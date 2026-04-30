@@ -56,7 +56,18 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+rustup target add \
+  aarch64-apple-darwin \
+  x86_64-apple-darwin \
+  x86_64-unknown-linux-gnu \
+  aarch64-unknown-linux-gnu >/dev/null
+
+# Cross's per-target toolchain on the host can lag behind current stable,
+# tripping our MSRV check. Force-refresh the Linux targets so the rustc
+# cross checks against matches host stable.
+rustup update --force-non-host \
+  stable-x86_64-unknown-linux-gnu \
+  stable-aarch64-unknown-linux-gnu >/dev/null
 
 mkdir -p dist
 rm -f dist/*

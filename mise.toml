@@ -102,8 +102,7 @@ ls -lh *.tar.gz SHA256SUMS
 '''
 
 [tasks."release:tag"]
-description = "Create + push the v<version> git tag (run after committing the version bump)"
-usage = "release:tag <version>"
+description = "Create + push the v<version> git tag (e.g. mise run release:tag 0.1.0)"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -136,8 +135,7 @@ echo "Tagged + pushed ${TAG}"
 '''
 
 [tasks."release:publish"]
-description = "Create the GitHub release for v<version> with dist/ artifacts (irreversible)"
-usage = "release:publish <version>"
+description = "Create the GitHub release for v<version> with dist/ artifacts (irreversible; e.g. mise run release:publish 0.1.0)"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail

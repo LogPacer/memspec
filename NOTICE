@@ -1,0 +1,33 @@
+memspec
+=======
+
+Copyright (c) 2026 MortenHusted
+Licensed under the MIT License (see LICENSE).
+
+This project's parser architecture is INSPIRED BY allium-tools
+(https://github.com/juxt/allium-tools), MIT-licensed by JUXT, 2026.
+
+memspec does NOT depend on allium-tools as a Cargo crate. We read
+allium-tools' parser source code (crates/allium-parser/src/) for
+architectural patterns: hand-rolled single-pass lexer with byte-span
+tracking, uniform `BlockDecl { kind, name, items }` AST shape, JSON-
+emitting diagnostic format, and span-bearing tokens. Implementations
+in this repository are written from scratch against memspec's slot
+grammar (cells / derived / associations / events / fallible-ops /
+state-after-failure / forbidden-states / kill-tests), which is
+structurally different from allium's behavioural-DSL grammar.
+
+The MIT license applies to both projects independently. The above
+attribution is a courtesy, not a license requirement.
+
+allium-tools LICENSE (excerpt):
+    MIT License
+    Copyright (c) 2026
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation
+    files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or
+    sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following
+    conditions: [...]

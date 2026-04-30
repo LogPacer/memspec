@@ -1,0 +1,45 @@
+// Multi-slice fixture — slice 1 of 2.
+//
+// Self-contained core lifecycle slice. Walks-clean independently.
+// rule_audit.memspec imports this slice and adds audit semantics on top.
+
+slice rule_lifecycle {
+    meta {
+        title: "Rule lifecycle (core)"
+        memspec_version: "0.1"
+        mode: brownfield
+        under_spec: "app/models/rule.rb"
+    }
+
+    walk 1 {
+        summary: "Core cells + the seed forbidden state."
+    }
+
+    cell rule_state {
+        type: enum<draft | published | archived>
+        mutable: true
+        default: draft
+        ref: "rule.rb:14"
+    }
+
+    cell rule_active {
+        type: boolean
+        mutable: true
+        default: true
+        ref: "rule.rb:15"
+    }
+
+    forbidden_state fs_archived_active {
+        description: "Archived rule with active=true is incoherent."
+        predicate: "rule_state == archived AND rule_active == true"
+        reachability: currently_reachable
+        kill_test: kt_archived_active
+    }
+
+    kill_test kt_archived_active {
+        forbidden: fs_archived_active
+        kind: structural
+        assertion: "No mutation path produces (rule_state=archived, rule_active=true)."
+        status: declared
+    }
+}

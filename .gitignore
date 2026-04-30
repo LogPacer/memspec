@@ -1,0 +1,25 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+
+# Author-private notes: rich CLAUDE.md context, internal worked-example
+# paper slices that cite unpublished code, design history. Not shipped.
+/internal-notes/
+
+# .claude/ is excluded by some global gitignores; the agents and slash commands
+# in this repo ARE part of the project and must be tracked. Negate the ignore
+# for the parts we own; keep settings.local.json (per-user) excluded.
+!.claude/
+!.claude/agents/
+!.claude/agents/**
+!.claude/commands/
+!.claude/commands/**
+.claude/settings.local.json
+
+# Codex skills are project-owned equivalents of the Claude agents/commands.
+!.codex/
+!.codex/prompts/
+!.codex/prompts/**
+!.codex/skills/
+!.codex/skills/**

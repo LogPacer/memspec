@@ -1,0 +1,155 @@
+// rule_lifecycle_minimal — first canonical .memspec fixture for the v0 lexer.
+// Generic Rails-shaped lifecycle (state × active flag × append-only changelog)
+// exercising every slot type at least once. Source-of-truth for early
+// lexer/parser tests. Paper artifact — paths and types are illustrative.
+
+slice rule_lifecycle_minimal {
+    meta {
+        title: "Rule lifecycle (minimal slice)"
+        memspec_version: "0.1"
+        mode: brownfield
+        under_spec: "app/models/rule.rb"
+    }
+
+    walk 1 {
+        summary: "Initial walk. Names the two coupled fields, the derived liveness predicate, the canonical promote/deprecate events, the symmetric-failure rows for both events, the seed forbidden state, and its kill-test."
+        added: [rule_state, rule_active, rule_is_live, no_archived_active, promote, deprecate, pf_promote_changelog_fail, pf_deprecate_changelog_fail, fs_archived_active, kt_archived_active]
+    }
+
+    cell rule_state {
+        type: enum<draft | published | archived>
+        mutable: true
+        default: draft
+        ref: "rule.rb:14"
+        cfg: production
+        impl_hints: { rust: "ActiveRecord enum column on rules.state" }
+    }
+
+    cell rule_active {
+        type: boolean
+        mutable: true
+        default: true
+        ref: "rule.rb:15"
+        cfg: production
+    }
+
+    cell rule_changelogs {
+        type: append_only_relation<RuleChangelog>
+        mutable: true
+        ref: "rule_changelog.rb:1"
+    }
+
+    derived rule_is_live {
+        derives_from: [rule_state, rule_active]
+        derivation: "rule_state == published AND rule_active == true"
+        materialised: false
+    }
+
+    association no_archived_active {
+        invariant: "NOT (rule_state == archived AND rule_active == true)"
+        over: [rule_state, rule_active]
+        enforced_by: convention
+    }
+
+    event promote {
+        trigger: "Rule#promote! called by reviewer"
+        mutates: [rule_state, rule_active, rule_changelogs]
+        atomicity: db_transaction
+        serialization: single_mutator
+
+        step s1_update {
+            op: "rule.update!(state: :published, active: true)"
+            fallible: true
+            failure_modes: [
+                "ActiveRecord::RecordInvalid",
+                "ActiveRecord::StaleObjectError",
+            ]
+            mutates: [rule_state, rule_active]
+        }
+
+        step s2_changelog {
+            op: "RuleChangelog.create!(rule: self, state_after: :published, ...)"
+            fallible: true
+            failure_modes: ["ActiveRecord::RecordInvalid"]
+            mutates: [rule_changelogs]
+            precondition: "s1_update succeeded"
+        }
+    }
+
+    event deprecate {
+        trigger: "Rule#deprecate! called by reviewer"
+        mutates: [rule_state, rule_changelogs]
+        atomicity: db_transaction
+
+        step s1_update {
+            op: "rule.update!(state: :archived)"
+            fallible: true
+            failure_modes: ["ActiveRecord::RecordInvalid"]
+            mutates: [rule_state]
+        }
+
+        step s2_changelog {
+            op: "RuleChangelog.create!(rule: self, state_after: :archived, ...)"
+            fallible: true
+            failure_modes: ["ActiveRecord::RecordInvalid"]
+            mutates: [rule_changelogs]
+            precondition: "s1_update succeeded"
+        }
+    }
+
+    post_failure pf_promote_changelog_fail {
+        event: promote
+        step: s2_changelog
+        outcome: "Err(ActiveRecord::RecordInvalid)"
+
+        cells_after_pre_rollback {
+            rule_state: published
+            rule_active: true
+            rule_changelogs: unchanged
+        }
+
+        cells_after_rollback {
+            rule_state: unchanged_from_pre_event
+            rule_active: unchanged_from_pre_event
+            rule_changelogs: unchanged
+        }
+
+        result: rejected
+        invariants_held_after_rollback: [no_archived_active]
+    }
+
+    post_failure pf_deprecate_changelog_fail {
+        event: deprecate
+        step: s2_changelog
+        outcome: "Err(ActiveRecord::RecordInvalid)"
+
+        cells_after_pre_rollback {
+            rule_state: archived
+            rule_changelogs: unchanged
+        }
+
+        cells_after_rollback {
+            rule_state: unchanged_from_pre_event
+            rule_changelogs: unchanged
+        }
+
+        result: rejected
+        invariants_held_after_rollback: [no_archived_active]
+    }
+
+    forbidden_state fs_archived_active {
+        description: "An archived rule that still claims active=true is logically broken; the active? predicate hides it but the row is incoherent."
+        predicate: "rule_state == archived AND rule_active == true"
+        reachability: currently_reachable
+        reachable_via_audited_path: false
+        kill_test: kt_archived_active
+    }
+
+    kill_test kt_archived_active {
+        forbidden: fs_archived_active
+        kind: structural
+        assertion: "No production code path produces (rule_state=archived, rule_active=true). Verified by grep over UPDATABLE_FIELDS and direct update! sites; promote!/deprecate!/supersede! all preserve the invariant."
+        ref: "test/models/rule_test.rb:202-214"
+        status: declared
+    }
+}

@@ -1,0 +1,54 @@
+// Multi-slice fixture — slice 2 of 2.
+//
+// Composes rule_lifecycle via cross-slice import. Adds audit semantics:
+// every state-change must be accompanied by a changelog row.
+//
+// `memspec walk rule_audit.memspec` should follow the import, walk both
+// files, and validate qualified refs (lc.rule_state, lc.rule_active).
+
+slice rule_audit {
+    use "./rule_lifecycle.memspec" as lc
+
+    meta {
+        title: "Rule audit (composed over rule_lifecycle)"
+        memspec_version: "0.1"
+        mode: brownfield
+        under_spec: "app/models/rule_changelog.rb"
+    }
+
+    walk 1 {
+        summary: "Audit slice — depends on rule_lifecycle's rule_state cell."
+    }
+
+    cell rule_changelogs {
+        type: append_only_relation<RuleChangelog>
+        mutable: true
+        ref: "rule_changelog.rb:1"
+    }
+
+    derived audit_completeness {
+        derives_from: [lc.rule_state, rule_changelogs]
+        derivation: "every change to lc.rule_state is paired with a row in rule_changelogs"
+        materialised: false
+    }
+
+    association no_state_change_without_audit {
+        invariant: "every transition in lc.rule_state writes a rule_changelogs row"
+        over: [lc.rule_state, rule_changelogs]
+        enforced_by: convention
+    }
+
+    forbidden_state fs_unaudited_state_change {
+        description: "A state change observable in lc.rule_state without a corresponding rule_changelogs row."
+        predicate: "lc.rule_state changed AND no new rule_changelogs row in same transaction"
+        reachability: currently_reachable
+        kill_test: kt_audit_completeness
+    }
+
+    kill_test kt_audit_completeness {
+        forbidden: fs_unaudited_state_change
+        kind: structural
+        assertion: "Every production write to rules.state goes through Rule#promote!/deprecate!/supersede!, each of which writes a RuleChangelog row inside the same AR transaction."
+        status: declared
+    }
+}

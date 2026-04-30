@@ -1,0 +1,167 @@
+[tools]
+rust = "stable"
+"cargo:cross" = "latest"
+
+[env]
+CARGO_TERM_COLOR = "always"
+
+# -----------------------------------------------------------------------------
+# Dev tasks
+# -----------------------------------------------------------------------------
+
+[tasks.build]
+description = "Build the workspace in release mode"
+run = "cargo build --release --workspace"
+
+[tasks.test]
+description = "Run the full test suite"
+run = "cargo test --workspace"
+
+[tasks.check]
+description = "Run cargo check + clippy + tests"
+run = [
+  "cargo check --workspace",
+  "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo test --workspace",
+]
+
+# -----------------------------------------------------------------------------
+# Release tasks
+# -----------------------------------------------------------------------------
+#
+# Typical flow:
+#   1. Edit CHANGELOG.md: rename [Unreleased] to [<version>] and date it.
+#   2. Bump `version` in Cargo.toml and .claude-plugin/plugin.json.
+#   3. Commit + push the version bump.
+#   4. mise run release:build    # produces dist/ tarballs
+#   5. mise run release:tag <version>
+#   6. mise run release:publish <version>
+#
+# The publish step is irreversible (creates a public GitHub release), so it is
+# kept separate from build+tag.
+
+[tasks."release:build"]
+description = "Build release tarballs for macOS (x86_64 + aarch64) and Linux (x86_64 + aarch64) into dist/"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+echo "Building memspec v${VERSION}"
+
+if ! docker info >/dev/null 2>&1; then
+  echo "error: docker daemon not reachable; cross needs Docker for Linux targets" >&2
+  echo "       start Docker Desktop and re-run" >&2
+  exit 1
+fi
+
+rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+
+mkdir -p dist
+rm -f dist/*
+
+build_target() {
+  local target="$1" builder="$2"
+  echo "  building $target via $builder"
+  "$builder" build --release --target "$target" -p memspec-cli
+
+  local stage="dist/memspec-v${VERSION}-${target}"
+  rm -rf "$stage"
+  mkdir -p "$stage"
+  cp "target/$target/release/memspec" "$stage/"
+  cp LICENSE NOTICE README.md CHANGELOG.md "$stage/" 2>/dev/null || true
+  tar -C dist -czf "${stage}.tar.gz" "$(basename "$stage")"
+  rm -rf "$stage"
+}
+
+# macOS: native cargo (cross would just fall back here anyway)
+build_target aarch64-apple-darwin   cargo
+build_target x86_64-apple-darwin    cargo
+
+# Linux: real cross-compilation via cross (Docker)
+build_target x86_64-unknown-linux-gnu  cross
+build_target aarch64-unknown-linux-gnu cross
+
+cd dist
+shasum -a 256 *.tar.gz > SHA256SUMS
+echo
+echo "Built artifacts:"
+ls -lh *.tar.gz SHA256SUMS
+'''
+
+[tasks."release:tag"]
+description = "Create + push the v<version> git tag (run after committing the version bump)"
+usage = "release:tag <version>"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:?usage: mise run release:tag <version>}"
+TAG="v${VERSION}"
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! git diff-index --quiet HEAD --; then
+  echo "error: working tree has uncommitted changes" >&2
+  exit 1
+fi
+
+CARGO_VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+if [ "$CARGO_VERSION" != "$VERSION" ]; then
+  echo "error: Cargo.toml version is ${CARGO_VERSION}, expected ${VERSION}" >&2
+  echo "       bump and commit the version first" >&2
+  exit 1
+fi
+
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "error: tag ${TAG} already exists" >&2
+  exit 1
+fi
+
+git tag -a "$TAG" -m "memspec ${TAG}"
+git push origin "$TAG"
+echo "Tagged + pushed ${TAG}"
+'''
+
+[tasks."release:publish"]
+description = "Create the GitHub release for v<version> with dist/ artifacts (irreversible)"
+usage = "release:publish <version>"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:?usage: mise run release:publish <version>}"
+TAG="v${VERSION}"
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v gh >/dev/null; then
+  echo "error: gh CLI not found" >&2
+  exit 1
+fi
+
+if ! ls dist/memspec-v${VERSION}-*.tar.gz >/dev/null 2>&1; then
+  echo "error: no dist/memspec-v${VERSION}-*.tar.gz artifacts found" >&2
+  echo "       run: mise run release:build" >&2
+  exit 1
+fi
+
+NOTES="$(awk -v ver="${VERSION}" '
+  $0 ~ "^## \\[" ver "\\]" { found=1; next }
+  found && /^## \[/ { exit }
+  found { print }
+' CHANGELOG.md)"
+
+if [ -z "$NOTES" ]; then
+  echo "warning: no CHANGELOG section for ${VERSION}; release notes will be empty" >&2
+fi
+
+gh release create "$TAG" \
+  --title "memspec ${TAG}" \
+  --notes "${NOTES:-Release ${TAG}.}" \
+  dist/memspec-v${VERSION}-*.tar.gz \
+  dist/SHA256SUMS
+
+echo "Published https://github.com/LogPacer/memspec/releases/tag/${TAG}"
+'''

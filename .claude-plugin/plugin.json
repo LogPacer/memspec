@@ -1,6 +1,6 @@
 {
   "name": "memspec",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Discipline-enforcing spec framework: native .memspec DSL + pure-Rust toolchain + agent layer (writer / scrutinizer / implementer / reviewer / slicer) for coupled-state work.",
   "author": {
     "name": "MortenHusted",

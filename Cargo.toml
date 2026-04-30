@@ -6,12 +6,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["MortenHusted"]
 repository = "https://github.com/logpacer/memspec"
-rust-version = "1.95"
+rust-version = "1.94"
 
 [workspace.dependencies]
 memspec-parser = { path = "crates/memspec-parser" }

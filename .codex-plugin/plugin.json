@@ -1,0 +1,46 @@
+{
+  "name": "memspec",
+  "version": "0.1.1",
+  "description": "Discipline-enforcing spec framework: native .memspec DSL + pure-Rust toolchain + agent layer for coupled-state work.",
+  "author": {
+    "name": "LogPacer",
+    "url": "https://github.com/LogPacer"
+  },
+  "homepage": "https://github.com/LogPacer/memspec",
+  "repository": "https://github.com/LogPacer/memspec",
+  "license": "MIT",
+  "keywords": [
+    "spec",
+    "specification",
+    "dsl",
+    "rust",
+    "discipline",
+    "coupled-state",
+    "forbidden-state",
+    "kill-test",
+    "agent",
+    "codex"
+  ],
+  "skills": "./.codex/skills/",
+  "interface": {
+    "displayName": "memspec",
+    "shortDescription": "Spec discipline workflows for coupled-state changes",
+    "longDescription": "Use memspec to decompose, author, scrutinize, implement, and review state-coupled software changes with a native .memspec DSL and Codex workflow skills.",
+    "developerName": "LogPacer",
+    "category": "Coding",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/LogPacer/memspec",
+    "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
+    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+    "defaultPrompt": [
+      "Author a memspec slice for this change.",
+      "Review this implementation against its memspec.",
+      "Slice this coupled-state problem."
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

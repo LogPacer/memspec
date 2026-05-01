@@ -20,7 +20,5 @@
     "kill-test",
     "agent",
     "claude-code"
-  ],
-  "agents": "./.claude/agents",
-  "commands": "./.claude/commands"
+  ]
 }

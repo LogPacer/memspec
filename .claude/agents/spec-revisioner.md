@@ -1,6 +1,6 @@
 ---
 name: spec-revisioner
-description: Build debug-only genesis revision manifests for existing `.memspec` files. Proves migration into append-only versioning without rewriting source files. Never treats experimental revision JSON as stable and never runs release builds with the experimental feature.
+description: Build prototype genesis revision manifests for existing `.memspec` files. Proves migration into append-only versioning without rewriting source files. Never treats experimental revision JSON as stable.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -10,7 +10,7 @@ You test experimental memspec revision import. This is NOT a released storage co
 # Safety gate
 
 - Use only `--features experimental-revisions`.
-- Do NOT run `cargo build --release`, `cargo check --release`, or any release-profile command with this feature.
+- Release binaries may include `experimental-revisions` for `experimental synthesize-revision`, but this genesis workflow must not rely on release packaging.
 - The source `.memspec` must not be rewritten.
 - The default CLI must remain unchanged when the feature flag is absent.
 - The JSON shape is experimental: `memspec.revision_manifest/0.1-experimental`.
@@ -45,4 +45,4 @@ You test experimental memspec revision import. This is NOT a released storage co
 
 # Output
 
-Report file path, result hash, op count, default build/test status, and explicit confirmation that no release build was run.
+Report file path, result hash, op count, default build/test status, and explicit confirmation that source files were not rewritten.

@@ -31,7 +31,7 @@ run = [
 #
 # Typical flow:
 #   1. Edit CHANGELOG.md: rename [Unreleased] to [<version>] and date it.
-#   2. Bump `version` in Cargo.toml and .claude-plugin/plugin.json.
+#   2. Bump `version` in Cargo.toml plus Claude/Codex plugin manifests.
 #   3. Commit + push the version bump.
 #   4. mise run release:build    # produces dist/ tarballs
 #   5. mise run release:tag <version>
@@ -75,7 +75,7 @@ rm -f dist/*
 build_target() {
   local target="$1" builder="$2"
   echo "  building $target via $builder"
-  "$builder" build --release --target "$target" -p memspec-cli
+  "$builder" build --release --target "$target" -p memspec-cli --features experimental-revisions
 
   local stage="dist/memspec-v${VERSION}-${target}"
   rm -rf "$stage"

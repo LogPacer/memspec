@@ -87,7 +87,7 @@ Six agents under `.claude/agents/`, five orchestration skills under `.claude/com
 | `/memspec-author <slice>` | Drives `spec-writer` ↔ `spec-scrutinizer` until walk-clean + APPROVE. |
 | `/memspec-implement <slice> <impl/>` | Drives `spec-implementer`; optionally chains into `/memspec-review`. |
 | `/memspec-review <slice> <impl/>` | Drives `spec-reviewer` as the merge gate. Does not auto-loop on REJECT — user decides which side to fix. |
-| `/memspec-genesis <slice>` | Drives `spec-revisioner` to emit an experimental revision-1 manifest. Requires `--features experimental-revisions`; no release build. |
+| `/memspec-genesis <slice>` | Drives `spec-revisioner` to emit an experimental revision-1 manifest. Requires `--features experimental-revisions`; genesis remains a prototype workflow. |
 
 Codex equivalents live under `.codex/skills/` as project-local skills and `.codex/prompts/` as command shims:
 
@@ -104,14 +104,14 @@ Use the skills by name, or invoke the command shims as `/prompts:memspec-author`
 
 ## Experimental revisions
 
-Revision import is intentionally debug-only:
+Revision genesis import is intentionally prototype-only:
 
 ```sh
 cargo run -p memspec-cli --features experimental-revisions -- \
   experimental genesis path/to/file.memspec --reason "initial import" --json
 ```
 
-The command emits a revision-1 genesis manifest without rewriting the source file. It records `base_hash: null`, `revision_number: 1`, a SHA-256 `result_hash`, the current materialized view hash, projection counts, and semantic add ops. This does not change default CLI behavior; the `experimental` command is absent unless the feature flag is enabled. Do not use release-profile builds for `experimental-revisions`.
+The genesis command emits a revision-1 manifest without rewriting the source file. It records `base_hash: null`, `revision_number: 1`, a SHA-256 `result_hash`, the current materialized view hash, projection counts, and semantic add ops. This does not change default CLI behavior; the `experimental` command is absent unless the feature flag is enabled. Release binaries are built with `experimental-revisions` so `memspec experimental synthesize-revision` is available to MemPacer's watcher, but genesis JSON remains an experimental migration artifact rather than a storage contract.
 
 ## Relationship to other tools
 

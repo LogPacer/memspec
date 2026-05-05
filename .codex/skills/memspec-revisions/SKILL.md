@@ -9,11 +9,11 @@ Build or inspect experimental revision manifests for existing `.memspec` files. 
 
 ## Safety Gate
 
-This workflow is debug-only. It must not change default CLI behavior.
+This workflow is prototype-only for genesis import. It must not change default CLI behavior.
 
 - The command exists only with `--features experimental-revisions`.
-- Do not use `--release` with `experimental-revisions`.
-- A release-profile build with this feature is expected to fail via `compile_error!`.
+- Release binaries may be built with `experimental-revisions` so `experimental synthesize-revision` is available to downstream tools.
+- Do not treat `experimental genesis` JSON as a stable storage contract.
 - Do not rewrite the source `.memspec` during genesis import.
 - Do not present the JSON shape as stable; it is `0.1-experimental`.
 
@@ -71,4 +71,4 @@ Report:
 - Whether source files were unchanged
 - Result hash and op count for representative files
 - Default no-feature test/build status
-- Explicit confirmation that no release build was made
+- Explicit confirmation that genesis import did not rewrite source files

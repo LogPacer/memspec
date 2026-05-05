@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-05
+
+### Added
+
+- Inline `.memspec` revisions-block analysis behind the `experimental-revisions` cargo feature, including strict replay of semantic operations and terminal hash checks.
+- `memspec experimental synthesize-revision`, which appends inline revisions for semantic changes in-place and is included in the binary release artifacts for MemPacer watcher integration.
+- Codex plugin manifest and Codex workflow skills/prompts for authoring, scrutinizing, implementing, reviewing, slicing, and revision experiments.
+
+### Changed
+
+- Release packaging now builds `memspec-cli` with `experimental-revisions` so release binaries expose `experimental synthesize-revision`.
+- Plugin manifests are versioned with the crate release.
+
 ## [0.1.0] - 2026-05-01
 
 First public release.
@@ -41,5 +54,6 @@ First public release.
 
 - Architecture inspired by [allium-tools](https://github.com/juxt/allium-tools) (JUXT, MIT 2026): hand-rolled lexer style, uniform `BlockDecl { kind, name, items }` AST shape, span-bearing diagnostic format. No code dependency; attribution preserved in `NOTICE`.
 
-[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/LogPacer/memspec/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LogPacer/memspec/releases/tag/v0.1.0

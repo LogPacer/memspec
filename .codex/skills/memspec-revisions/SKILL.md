@@ -1,74 +1,54 @@
 ---
 name: memspec-revisions
-description: Use when migrating existing .memspec files into experimental revision/genesis manifests or testing append-only memspec versioning. Also for /memspec-genesis, revision history prototypes, base_hash/result_hash checks, and debug-only versioning trials.
+description: Use when generating a revision-1 genesis manifest for an existing `.memspec` file. Source-preserving — proves the file can become revision 1 of an append-only chain without modifying it. Also for /memspec-genesis, base_hash/result_hash checks, and seeding the inline revisions block before `/memspec-revise` takes over.
 ---
 
-# Memspec Revisions
+# Memspec Revisions (Genesis)
 
-Build or inspect experimental revision manifests for existing `.memspec` files. This is a migration/prototype workflow, not a released storage contract.
+Drive `memspec experimental genesis` against a single `.memspec` file. The command emits a JSON manifest declaring revision 1 — `base_revision: null`, `base_hash: null`, `result_hash` matching the file's projection hash, and a list of `add_*` ops reproducing every declaration in the slice from an empty baseline.
 
-## Safety Gate
+Genesis is **source-preserving** — it does not modify the file. To actually start an inline `revisions { ... }` block in the file, transcribe the genesis result into a `revisions { revision 1 { ... } }` clause inside the slice; subsequent revisions are appended via `memspec-synthesize`.
 
-This workflow is prototype-only for genesis import. It must not change default CLI behavior.
+For appending revisions to a file that already has an inline `revisions { ... }` block, use the `memspec-synthesize` skill instead.
 
-- The command exists only with `--features experimental-revisions`.
-- Release binaries may be built with `experimental-revisions` so `experimental synthesize-revision` is available to downstream tools.
-- Do not treat `experimental genesis` JSON as a stable storage contract.
-- Do not rewrite the source `.memspec` during genesis import.
-- Do not present the JSON shape as stable; it is `0.1-experimental`.
+## Pre-conditions
 
-## Genesis Import
+- `memspec walk <file>` exits 0.
 
-Use this command to prove an existing `.memspec` can become revision 1 unchanged:
+## Workflow
 
-```bash
-cargo run -p memspec-cli --features experimental-revisions -- \
-  experimental genesis <file.memspec> --reason "initial import" --author <agent> --json
-```
+1. Confirm `memspec walk <file> --json` exit code is 0.
+2. Generate the manifest:
 
-Expected semantics:
+   ```bash
+   memspec experimental genesis <file> --reason "initial import" --author <name> --json
+   ```
 
-- `revision_number: 1`
-- `base_revision: null`
-- `base_hash: null`
-- `result_hash` equals `materialized_view.source_hash`
-- `patch_format_version: "memspec.semantic_patch/0.1-experimental"`
-- `ops` contains `genesis_from_materialized_view` plus semantic add ops for slice/import/walk/declaration/step entries.
+   Source build:
 
-## Verification
+   ```bash
+   cargo run -p memspec-cli --features experimental-revisions -- \
+     experimental genesis <file> --reason "initial import" --author <name> --json
+   ```
 
-Run default behavior checks without feature flags:
+3. Verify the manifest shape:
+   - `revision_number: 1`
+   - `base_revision: null`
+   - `base_hash: null`
+   - `result_hash` equals `materialized_view.source_hash`
+   - `patch_format_version: "memspec.semantic_patch/0.1-experimental"`
+   - `ops[0]` is `genesis_from_materialized_view`; subsequent ops include `add_slice`, `add_import`, `add_walk`, and `add_*` for each declaration.
 
-```bash
-cargo test --workspace
-cargo build --workspace
-cargo run -p memspec-cli -- --help
-```
+4. Confirm the source file is byte-identical to before (`shasum -a 256 <file>` matches pre-run hash).
 
-The default help must not expose `experimental`.
+## Rules
 
-Run prototype checks explicitly:
-
-```bash
-cargo test --workspace --features experimental-revisions
-cargo run -p memspec-cli --features experimental-revisions -- experimental genesis <file.memspec>
-```
-
-For bulk migration trials:
-
-```bash
-for f in $(find . -name '*.memspec' -print); do
-  cargo run --quiet -p memspec-cli --features experimental-revisions -- \
-    experimental genesis "$f" --reason "initial import" >/tmp/memspec_genesis.out
-done
-```
+- The source `.memspec` MUST NOT be rewritten. Genesis is read-only.
+- Do not present the manifest as a stable storage contract — `patch_format_version` is `0.1-experimental`.
 
 ## Output
 
-Report:
-
-- File(s) tested
-- Whether source files were unchanged
-- Result hash and op count for representative files
-- Default no-feature test/build status
-- Explicit confirmation that genesis import did not rewrite source files
+- File path.
+- Manifest summary: `result_hash`, op count, recorded reason and author.
+- Source-byte-identical confirmation.
+- Suggested next step: transcribe into `revisions { revision 1 { ... } }`, then use `memspec-synthesize` for further edits.

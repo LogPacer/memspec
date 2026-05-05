@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `spec-synthesizer` agent and `/memspec-revise` slash command (Claude) plus the matching `memspec-synthesize` skill and `/memspec-revise` prompt (Codex). Drives `memspec experimental synthesize-revision` to append inline revisions hash-chained against the prior `result_hash`, with replay-validation on the rewritten file.
+
+### Changed
+
+- `spec-revisioner` agent and `/memspec-genesis` command (Claude) plus the `memspec-revisions` skill and `/memspec-genesis` prompt (Codex) tightened to genesis-only scope. Dropped the "experimental / prototype / debug-only" framing now that synthesize-revision is the production append flow; both surfaces now cross-reference each other (genesis seeds revision 1, synthesize appends N+1).
+
 ## [0.2.0] - 2026-05-05
 
 ### Added

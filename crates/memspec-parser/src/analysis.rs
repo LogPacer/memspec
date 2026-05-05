@@ -25,11 +25,6 @@ pub mod structural;
 pub mod suggest;
 pub mod symmetric_failure;
 
-#[cfg(all(feature = "experimental-revisions", not(debug_assertions)))]
-compile_error!(
-    "experimental-revisions is a debug-only prototype and must not be built for release profiles"
-);
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -58,6 +53,8 @@ pub fn analyze(file: &File) -> AnalysisResult {
     structural::run(file, &mut diagnostics);
     coherence::run(file, &mut diagnostics);
     symmetric_failure::run(file, &mut diagnostics);
+    #[cfg(feature = "experimental-revisions")]
+    revisions::run(file, &mut diagnostics);
     AnalysisResult { diagnostics }
 }
 
@@ -77,6 +74,8 @@ pub fn analyze_working_set(ws: &WorkingSet) -> WorkingSetAnalysis {
         structural::run(&lf.file, &mut diagnostics);
         coherence::run(&lf.file, &mut diagnostics);
         symmetric_failure::run(&lf.file, &mut diagnostics);
+        #[cfg(feature = "experimental-revisions")]
+        revisions::run(&lf.file, &mut diagnostics);
         by_file.insert(lf.path.clone(), diagnostics);
     }
 

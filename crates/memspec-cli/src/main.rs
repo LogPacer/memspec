@@ -13,11 +13,10 @@
 //!
 //! v0-day-1 only emits 0 / 2 / 4 (no parser, no analyzer yet).
 
-#[cfg(all(feature = "experimental-revisions", not(debug_assertions)))]
-compile_error!(
-    "experimental-revisions is a debug-only prototype and must not be built for release profiles"
-);
-
+#[cfg(feature = "experimental-revisions")]
+use std::io::Write;
+#[cfg(feature = "experimental-revisions")]
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -153,13 +152,35 @@ enum ExperimentalCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Append inline revisions for the semantic changes currently present in a .memspec file.
+    SynthesizeRevision {
+        /// Path to a .memspec file.
+        file: PathBuf,
+        /// Human reason stored on the appended revision.
+        #[arg(long, default_value = "automated edit via watcher")]
+        reason: String,
+        /// Optional author label for the revision entry.
+        #[arg(long)]
+        author: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Walk { file, json, single_file } => walk(&file, json, single_file),
-        Command::Render { file, format, aggregate } => render_cmd(&file, format, aggregate),
+        Command::Walk {
+            file,
+            json,
+            single_file,
+        } => walk(&file, json, single_file),
+        Command::Render {
+            file,
+            format,
+            aggregate,
+        } => render_cmd(&file, format, aggregate),
         Command::Diff { file, from, to } => diff_cmd(&file, from, to),
         Command::Suggest { file } => suggest_cmd(&file),
         Command::View { path } => match tui::run(path) {
@@ -220,6 +241,11 @@ fn schema_cmd() -> ExitCode {
         "experimental_genesis_revision",
         defs,
     );
+    #[cfg(feature = "experimental-revisions")]
+    add::<memspec_parser::analysis::revisions::RevisionAppendReport>(
+        "experimental_revision_append",
+        defs,
+    );
     // Common types referenced by everything
     add::<memspec_parser::Diagnostic>("diagnostic", defs);
     add::<memspec_parser::Severity>("severity", defs);
@@ -246,6 +272,12 @@ fn experimental(command: ExperimentalCommand) -> ExitCode {
             author,
             json,
         } => genesis_cmd(&file, reason, author, json),
+        ExperimentalCommand::SynthesizeRevision {
+            file,
+            reason,
+            author,
+            json,
+        } => synthesize_revision_cmd(&file, reason, author, json),
     }
 }
 
@@ -311,6 +343,153 @@ fn genesis_cmd(path: &PathBuf, reason: String, author: Option<String>, json: boo
     }
 
     ExitCode::from(0)
+}
+
+#[cfg(feature = "experimental-revisions")]
+fn synthesize_revision_cmd(
+    path: &PathBuf,
+    reason: String,
+    author: Option<String>,
+    json: bool,
+) -> ExitCode {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("memspec: cannot read {}: {e}", path.display());
+            return ExitCode::from(4);
+        }
+    };
+
+    let synthesis = match revisions::synthesize_revision_source(
+        &source,
+        Some(path.display().to_string()),
+        reason,
+        author,
+    ) {
+        Ok(synthesis) => synthesis,
+        Err(err) => {
+            eprintln!("memspec experimental synthesize-revision: {}", err.message);
+            print_revision_diagnostics(&source, &err.diagnostics);
+            return exit_for_diagnostics(&err.diagnostics);
+        }
+    };
+
+    if synthesis.report.no_op {
+        if json {
+            match serde_json::to_string_pretty(&synthesis.report) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("memspec: failed to serialize revision append report: {e}");
+                    return ExitCode::from(4);
+                }
+            }
+        } else {
+            println!("{}", synthesis.report.message);
+        }
+        return ExitCode::from(0);
+    }
+
+    #[cfg(debug_assertions)]
+    let mut new_source = synthesis.new_source;
+    #[cfg(not(debug_assertions))]
+    let new_source = synthesis.new_source;
+    #[cfg(debug_assertions)]
+    if std::env::var_os("MEMSPEC_SYNTH_REPLAY_CHECK_CORRUPT_FOR_TEST").is_some() {
+        corrupt_last_result_hash_for_test(&mut new_source);
+    }
+
+    if let Err(e) = atomic_write(path, new_source.as_bytes()) {
+        eprintln!("memspec: cannot atomically write {}: {e}", path.display());
+        return ExitCode::from(4);
+    }
+
+    let written = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("memspec: cannot read {} after write: {e}", path.display());
+            return ExitCode::from(4);
+        }
+    };
+    let parse_result = parser::parse(&written);
+    let analysis = memspec_parser::analyze(&parse_result.file);
+    let mut diagnostics = parse_result.diagnostics;
+    diagnostics.extend(analysis.diagnostics);
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        eprintln!(
+            "memspec experimental synthesize-revision: freshly written file failed replay check"
+        );
+        print_revision_diagnostics(&written, &diagnostics);
+        return exit_for_diagnostics(&diagnostics);
+    }
+
+    if json {
+        match serde_json::to_string_pretty(&synthesis.report) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("memspec: failed to serialize revision append report: {e}");
+                return ExitCode::from(4);
+            }
+        }
+    } else {
+        let revision_number = synthesis
+            .report
+            .revisions
+            .last()
+            .map(|revision| revision.revision_number)
+            .unwrap_or(0);
+        println!("appended revision {revision_number} to {}", path.display());
+    }
+
+    ExitCode::from(0)
+}
+
+#[cfg(feature = "experimental-revisions")]
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file_mut().sync_all()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    let dir = std::fs::File::open(parent)?;
+    dir.sync_all()?;
+    Ok(())
+}
+
+#[cfg(feature = "experimental-revisions")]
+fn print_revision_diagnostics(source: &str, diagnostics: &[Diagnostic]) {
+    let map = SourceMap::new(source);
+    for diagnostic in diagnostics {
+        let lc = map.line_col(diagnostic.span.start.min(source.len()));
+        eprintln!(
+            "  [{}] {}:{} {}: {}",
+            diagnostic.code,
+            lc.line,
+            lc.col,
+            diagnostic.severity.as_str(),
+            diagnostic.message
+        );
+        if let Some(hint) = &diagnostic.hint {
+            eprintln!("        hint: {hint}");
+        }
+    }
+}
+
+#[cfg(all(feature = "experimental-revisions", debug_assertions))]
+fn corrupt_last_result_hash_for_test(source: &mut String) {
+    let needle = "result_hash: \"sha256:";
+    let Some(offset) = source.rfind(needle) else {
+        return;
+    };
+    let pos = offset + needle.len();
+    if pos >= source.len() {
+        return;
+    }
+    let replacement = if source.as_bytes()[pos] == b'0' {
+        "1"
+    } else {
+        "0"
+    };
+    source.replace_range(pos..pos + 1, replacement);
 }
 
 fn suggest_cmd(path: &PathBuf) -> ExitCode {
@@ -507,7 +686,12 @@ fn walk_single(path: &PathBuf, json: bool) -> ExitCode {
     let map = SourceMap::new(&source);
 
     if json {
-        let report = JsonReport::build(path.display().to_string(), &parse_result.file, &diagnostics, &map);
+        let report = JsonReport::build(
+            path.display().to_string(),
+            &parse_result.file,
+            &diagnostics,
+            &map,
+        );
         match serde_json::to_string_pretty(&report) {
             Ok(s) => println!("{s}"),
             Err(e) => {
@@ -567,7 +751,11 @@ fn walk_multi(path: &PathBuf, json: bool) -> ExitCode {
 ///
 /// Honest reporting is preserved when the file IS a real `.memspec` with
 /// bad content somewhere — that produces a few E0003s, not hundreds.
-fn maybe_wrong_file_type(diagnostics: &[Diagnostic], source: &str, path: &PathBuf) -> Option<Diagnostic> {
+fn maybe_wrong_file_type(
+    diagnostics: &[Diagnostic],
+    source: &str,
+    path: &PathBuf,
+) -> Option<Diagnostic> {
     let lex_count = diagnostics
         .iter()
         .filter(|d| d.code == "memspec/E0003")
@@ -644,16 +832,35 @@ fn exit_for_diagnostics_refs(diagnostics: &[&Diagnostic]) -> ExitCode {
     }
 }
 
-fn print_multi_text_report(ws: &memspec_parser::analysis::loader::WorkingSet, analysis: &memspec_parser::analysis::WorkingSetAnalysis) {
+fn print_multi_text_report(
+    ws: &memspec_parser::analysis::loader::WorkingSet,
+    analysis: &memspec_parser::analysis::WorkingSetAnalysis,
+) {
     let n = ws.files.len();
-    println!("memspec walk: {n} file(s) loaded (root: {})", ws.root.display());
+    println!(
+        "memspec walk: {n} file(s) loaded (root: {})",
+        ws.root.display()
+    );
 
     for lf in &ws.files {
-        let diagnostics = analysis.by_file.get(&lf.path).map(Vec::as_slice).unwrap_or(&[]);
+        let diagnostics = analysis
+            .by_file
+            .get(&lf.path)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let counts = SliceCounts::from_file(&lf.file);
-        let errors = diagnostics.iter().filter(|d| d.severity == Severity::Error).count();
-        let warnings = diagnostics.iter().filter(|d| d.severity == Severity::Warning).count();
-        let infos = diagnostics.iter().filter(|d| d.severity == Severity::Info).count();
+        let errors = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count();
+        let warnings = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count();
+        let infos = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Info)
+            .count();
         let map = SourceMap::new(&lf.source);
 
         println!();
@@ -664,7 +871,10 @@ fn print_multi_text_report(ws: &memspec_parser::analysis::loader::WorkingSet, an
         println!("  cells:                {}", counts.cells);
         println!("  derived:              {}", counts.derived);
         println!("  associations:         {}", counts.associations);
-        println!("  events:               {} (steps: {})", counts.events, counts.steps);
+        println!(
+            "  events:               {} (steps: {})",
+            counts.events, counts.steps
+        );
         println!("  post_failure rows:    {}", counts.post_failure);
         println!("  forbidden_states:     {}", counts.forbidden_states);
         println!("  kill_tests:           {}", counts.kill_tests);
@@ -702,9 +912,18 @@ fn print_multi_text_report(ws: &memspec_parser::analysis::loader::WorkingSet, an
 
 fn print_text_report(path: &PathBuf, file: &File, diagnostics: &[Diagnostic], map: &SourceMap<'_>) {
     let counts = SliceCounts::from_file(file);
-    let errors = diagnostics.iter().filter(|d| d.severity == Severity::Error).count();
-    let warnings = diagnostics.iter().filter(|d| d.severity == Severity::Warning).count();
-    let infos = diagnostics.iter().filter(|d| d.severity == Severity::Info).count();
+    let errors = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+    let warnings = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
+    let infos = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Info)
+        .count();
 
     println!("memspec walk: {}", path.display());
     if let Some(slice_name) = counts.slice_name.as_deref() {
@@ -715,14 +934,15 @@ fn print_text_report(path: &PathBuf, file: &File, diagnostics: &[Diagnostic], ma
     println!("  cells:                {}", counts.cells);
     println!("  derived:              {}", counts.derived);
     println!("  associations:         {}", counts.associations);
-    println!("  events:               {} (steps: {})", counts.events, counts.steps);
+    println!(
+        "  events:               {} (steps: {})",
+        counts.events, counts.steps
+    );
     println!("  post_failure rows:    {}", counts.post_failure);
     println!("  forbidden_states:     {}", counts.forbidden_states);
     println!("  kill_tests:           {}", counts.kill_tests);
     println!("  walks declared:       {}", counts.walks);
-    println!(
-        "  diagnostics:          {errors} error(s), {warnings} warning(s), {infos} info"
-    );
+    println!("  diagnostics:          {errors} error(s), {warnings} warning(s), {infos} info");
 
     let status = if errors > 0 {
         "walk-incomplete"
@@ -770,7 +990,9 @@ struct SliceCounts {
 impl SliceCounts {
     fn from_file(file: &File) -> Self {
         let mut counts = Self::default();
-        let Some(slice) = &file.slice else { return counts };
+        let Some(slice) = &file.slice else {
+            return counts;
+        };
         counts.slice_name = Some(slice.name.name.clone());
         for item in &slice.items {
             let BlockItem::Block(b) = item else { continue };
@@ -891,7 +1113,11 @@ impl JsonMultiReport {
         Self {
             root: ws.root.display().to_string(),
             files: entries,
-            summary: JsonSummary { errors, warnings, info },
+            summary: JsonSummary {
+                errors,
+                warnings,
+                info,
+            },
         }
     }
 }
@@ -928,7 +1154,11 @@ impl JsonReport {
             file,
             slice: SliceCounts::from_file(ast),
             diagnostics: json_diags,
-            summary: JsonSummary { errors, warnings, info },
+            summary: JsonSummary {
+                errors,
+                warnings,
+                info,
+            },
         }
     }
 }

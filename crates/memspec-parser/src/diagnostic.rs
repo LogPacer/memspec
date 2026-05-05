@@ -133,4 +133,15 @@ pub mod codes {
     pub const W_COMP_UNUSED_IMPORT: &str = "memspec/W0273";
     pub const W_COMP_DUPLICATE_IMPORT_TARGET: &str = "memspec/W0274";
     pub const W_COMP_IMPORTED_ID_SHADOWED: &str = "memspec/W0275";
+
+    // Analyzer — inline revisions (E0500 – E0549, W0570 – W0579)
+    pub const E_REV_BASE_HASH_BREAK: &str = "memspec/E0500";
+    pub const E_REV_NUMBER_GAP: &str = "memspec/E0501";
+    pub const E_REV_TERMINAL_MISMATCH: &str = "memspec/E0502";
+    pub const E_REV_REPLAY_FAILED: &str = "memspec/E0503";
+    pub const E_REV_UNKNOWN_OP: &str = "memspec/E0504";
+    pub const E_REV_REORDER_FORBIDDEN_ON_WALKS: &str = "memspec/E0505";
+    pub const E_REV_DIFF_NULL_BUT_TEXT_DIFFERS: &str = "memspec/E0506";
+    pub const E_REV_DIFF_VOCABULARY_HOLE: &str = "memspec/E0507";
+    pub const W_REV_LONG_CHAIN: &str = "memspec/W0570";
 }

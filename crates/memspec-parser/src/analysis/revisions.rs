@@ -11,7 +11,9 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::ast::{BlockDecl, BlockItem, BlockName, Field, FieldValue, File, MapEntry, SliceDecl};
+use crate::ast::{
+    BlockDecl, BlockItem, BlockName, Field, FieldValue, File, Ident, Import, MapEntry, SliceDecl,
+};
 use crate::diagnostic::{Diagnostic, Severity, codes};
 use crate::parser;
 use crate::span::Span;
@@ -96,8 +98,6 @@ pub enum SemanticPatchOp {
         source_hash: String,
         byte_len: usize,
         line_count: usize,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source: Option<String>,
     },
     AddSlice {
         id: String,
@@ -150,7 +150,6 @@ pub enum SemanticPatchOp {
 pub struct InlineRevision {
     pub span: Span,
     pub summary: RevisionSummary,
-    pub source_snapshot: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -201,7 +200,6 @@ pub fn build_genesis_revision(
         source_hash: source_hash.clone(),
         byte_len: materialized_view.byte_len,
         line_count: materialized_view.line_count,
-        source: None,
     }];
 
     let mut projection = ProjectionSummary::default();
@@ -317,11 +315,14 @@ pub fn synthesize_revision_source(
     } else {
         reason
     };
-    let previous_projection = chain
-        .revisions
-        .last()
-        .and_then(|revision| revision.source_snapshot.clone())
-        .unwrap_or_else(|| empty_projection_for_file(&file));
+    let previous_projection = if chain.revisions.is_empty() {
+        empty_projection_for_file(&file)
+    } else {
+        replay_revisions(&file, &chain.revisions).map_err(|diagnostic| RevisionSynthesisError {
+            message: "existing revision chain failed replay validation".to_owned(),
+            diagnostics: vec![diagnostic],
+        })?
+    };
     let ops = diff_projections(&previous_projection, &projection)?;
 
     if ops.is_empty() {
@@ -354,10 +355,8 @@ pub fn synthesize_revision_source(
                     source_hash: genesis_hash,
                     byte_len: genesis_source.len(),
                     line_count: line_count(&genesis_source),
-                    source: Some(genesis_source.clone()),
                 }],
             },
-            source_snapshot: genesis_source,
         });
         appended.push(RevisionToRender {
             summary: RevisionSummary {
@@ -370,7 +369,6 @@ pub fn synthesize_revision_source(
                 author,
                 ops,
             },
-            source_snapshot: projection,
         });
     } else {
         let last = chain
@@ -389,7 +387,6 @@ pub fn synthesize_revision_source(
                 author,
                 ops,
             },
-            source_snapshot: projection,
         });
     }
 
@@ -423,7 +420,6 @@ pub fn synthesize_revision_source(
         chain.revisions.push(InlineRevision {
             span: Span::DUMMY,
             summary: revision.summary.clone(),
-            source_snapshot: Some(revision.source_snapshot.clone()),
         });
     }
 
@@ -579,7 +575,6 @@ enum TerminalCheck {
 #[derive(Debug, Clone)]
 struct RevisionToRender {
     summary: RevisionSummary,
-    source_snapshot: String,
 }
 
 fn validate_inline_revision_chain(
@@ -670,6 +665,14 @@ fn validate_inline_revision_chain(
         }
     }
 
+    let replayed_projection = match replay_revisions(file, revisions) {
+        Ok(projection) => Some(projection),
+        Err(diagnostic) => {
+            out.push(diagnostic);
+            None
+        }
+    };
+
     if matches!(terminal_check, TerminalCheck::RequireCurrentProjection) {
         let projection = canonical_source_projection(file);
         let projection_hash = source_sha256(&projection);
@@ -689,23 +692,512 @@ fn validate_inline_revision_chain(
                 ),
             );
         }
-        if let Some(snapshot) = &last.source_snapshot {
-            let snapshot_hash = source_sha256(snapshot);
-            if snapshot_hash != last.summary.result_hash {
+        if let Some(replayed_projection) = replayed_projection {
+            let replayed_hash = source_sha256(&replayed_projection);
+            if replayed_hash != projection_hash {
                 out.push(
                     Diagnostic::error(
                         codes::E_REV_REPLAY_FAILED,
                         last.span,
                         format!(
-                            "revision {} source snapshot hashes to {snapshot_hash}, not {}",
-                            last.summary.revision_number, last.summary.result_hash
+                            "terminal replay hash {replayed_hash} does not match current source projection {projection_hash}"
                         ),
                     )
-                    .with_hint("the inline source snapshot must match the revision result_hash"),
+                    .with_hint(
+                        "revision ops must replay to the same projection as the current source",
+                    ),
                 );
             }
         }
     }
+}
+
+fn replay_revisions(file: &File, revisions: &[InlineRevision]) -> Result<String, Diagnostic> {
+    let empty_projection = empty_projection_for_file(file);
+    let mut replay_file = parser::parse(&empty_projection).file;
+
+    for revision in revisions {
+        for op in &revision.summary.ops {
+            apply_revision_op(&mut replay_file, op, revision.span)?;
+        }
+        let projection = canonical_source_projection(&replay_file);
+        let replay_hash = source_sha256(&projection);
+        if replay_hash != revision.summary.result_hash {
+            return Err(replay_error(
+                revision.span,
+                format!(
+                    "revision {} ops replay to {replay_hash}, not declared result_hash {}",
+                    revision.summary.revision_number, revision.summary.result_hash
+                ),
+            )
+            .with_hint("the semantic patch ops must explain the full revision hash transition"));
+        }
+    }
+
+    Ok(canonical_source_projection(&replay_file))
+}
+
+fn apply_revision_op(file: &mut File, op: &SemanticPatchOp, span: Span) -> Result<(), Diagnostic> {
+    match op {
+        SemanticPatchOp::GenesisFromMaterializedView {
+            source_hash,
+            byte_len,
+            line_count: expected_lines,
+        } => {
+            let projection = canonical_source_projection(file);
+            let replay_hash = source_sha256(&projection);
+            if &replay_hash != source_hash {
+                return Err(replay_error(
+                    span,
+                    format!(
+                        "genesis source_hash {source_hash} does not match replay cursor {replay_hash}"
+                    ),
+                ));
+            }
+            if projection.len() != *byte_len {
+                return Err(replay_error(
+                    span,
+                    format!(
+                        "genesis byte_len {byte_len} does not match replay cursor byte_len {}",
+                        projection.len()
+                    ),
+                ));
+            }
+            let actual_lines = line_count(&projection);
+            if actual_lines != *expected_lines {
+                return Err(replay_error(
+                    span,
+                    format!(
+                        "genesis line_count {expected_lines} does not match replay cursor line_count {actual_lines}"
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        SemanticPatchOp::AddSlice { id, .. } => {
+            let slice = replay_slice_mut(file, span)?;
+            if slice.name.name != *id {
+                return Err(replay_error(
+                    span,
+                    format!(
+                        "add_slice id `{id}` does not match replay slice `{}`",
+                        slice.name.name
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        SemanticPatchOp::AddImport { alias, path, .. } => {
+            let slice = replay_slice_mut(file, span)?;
+            if let Some(existing) = slice
+                .imports
+                .iter()
+                .find(|import| import.alias.name == *alias)
+            {
+                if existing.path == *path {
+                    return Ok(());
+                }
+                return Err(replay_error(
+                    span,
+                    format!(
+                        "add_import alias `{alias}` already points to `{}`",
+                        existing.path
+                    ),
+                ));
+            }
+            slice.imports.push(Import {
+                span: Span::DUMMY,
+                path: path.clone(),
+                path_span: Span::DUMMY,
+                alias: Ident {
+                    span: Span::DUMMY,
+                    name: alias.clone(),
+                },
+            });
+            Ok(())
+        }
+        SemanticPatchOp::AddWalk { walk, .. } => {
+            let slice = replay_slice_mut(file, span)?;
+            if top_level_block_index(slice, "walk", &walk.to_string()).is_some() {
+                return Err(replay_error(
+                    span,
+                    format!("add_walk target `{walk}` already exists"),
+                ));
+            }
+            slice.items.push(BlockItem::Block(empty_block(
+                "walk",
+                Some(BlockName::Int {
+                    span: Span::DUMMY,
+                    value: *walk,
+                }),
+            )));
+            Ok(())
+        }
+        SemanticPatchOp::AddDeclaration { kind, id, .. } => {
+            let slice = replay_slice_mut(file, span)?;
+            if top_level_block_index(slice, kind, id).is_some() {
+                return Err(replay_error(
+                    span,
+                    format!("add_declaration target `{kind} {id}` already exists"),
+                ));
+            }
+            slice.items.push(BlockItem::Block(empty_block(
+                kind,
+                Some(BlockName::Ident(Ident {
+                    span: Span::DUMMY,
+                    name: id.clone(),
+                })),
+            )));
+            Ok(())
+        }
+        SemanticPatchOp::AddStep { event, id, .. } => {
+            let slice = replay_slice_mut(file, span)?;
+            let Some(event_index) = top_level_block_index(slice, "event", event) else {
+                return Err(replay_error(
+                    span,
+                    format!("add_step target event `{event}` does not exist"),
+                ));
+            };
+            let BlockItem::Block(event_block) = &mut slice.items[event_index] else {
+                unreachable!("top_level_block_index only returns blocks");
+            };
+            if child_block_index(event_block, "step", id).is_some() {
+                return Err(replay_error(
+                    span,
+                    format!("add_step target `{event}.{id}` already exists"),
+                ));
+            }
+            event_block.items.push(BlockItem::Block(empty_block(
+                "step",
+                Some(BlockName::Ident(Ident {
+                    span: Span::DUMMY,
+                    name: id.clone(),
+                })),
+            )));
+            Ok(())
+        }
+        SemanticPatchOp::AddBlock { kind, name, items } => {
+            let block = parse_replay_block(kind, name, items, span)?;
+            let slice = replay_slice_mut(file, span)?;
+            if top_level_block_index(slice, kind, name).is_some() {
+                return Err(replay_error(
+                    span,
+                    format!("add_block target `{kind} {name}` already exists"),
+                ));
+            }
+            slice.items.push(BlockItem::Block(block));
+            Ok(())
+        }
+        SemanticPatchOp::RemoveBlock { kind, name } => {
+            let slice = replay_slice_mut(file, span)?;
+            let Some(index) = top_level_block_index(slice, kind, name) else {
+                return Err(replay_error(
+                    span,
+                    format!("remove_block target `{kind} {name}` does not exist"),
+                ));
+            };
+            slice.items.remove(index);
+            Ok(())
+        }
+        SemanticPatchOp::ModifyField {
+            block_path,
+            field_name,
+            value,
+        } => {
+            let value = parse_replay_field_value(field_name, value, span)?;
+            let block = replay_block_by_path_mut(file, block_path, span)?;
+            match field_index(block, field_name) {
+                Some(index) => {
+                    let BlockItem::Field(field) = &mut block.items[index] else {
+                        unreachable!("field_index only returns fields");
+                    };
+                    field.value = value;
+                }
+                None => block.items.push(BlockItem::Field(Field {
+                    span: Span::DUMMY,
+                    key: Ident {
+                        span: Span::DUMMY,
+                        name: field_name.clone(),
+                    },
+                    value,
+                })),
+            }
+            Ok(())
+        }
+        SemanticPatchOp::RemoveField {
+            block_path,
+            field_name,
+        } => {
+            let block = replay_block_by_path_mut(file, block_path, span)?;
+            let Some(index) = field_index(block, field_name) else {
+                return Err(replay_error(
+                    span,
+                    format!("remove_field target `{field_name}` does not exist"),
+                ));
+            };
+            block.items.remove(index);
+            Ok(())
+        }
+        SemanticPatchOp::ReorderItems {
+            block_path,
+            new_order,
+        } => {
+            if reorder_targets_walk_path(block_path) {
+                return Err(Diagnostic::error(
+                    codes::E_REV_REORDER_FORBIDDEN_ON_WALKS,
+                    span,
+                    "ReorderItems may not target walk declarations",
+                ));
+            }
+            let block = replay_block_by_path_mut(file, block_path, span)?;
+            reorder_child_blocks(block, new_order, span)
+        }
+    }
+}
+
+fn replay_slice_mut(file: &mut File, span: Span) -> Result<&mut SliceDecl, Diagnostic> {
+    file.slice.as_mut().ok_or_else(|| {
+        replay_error(
+            span,
+            "revision replay cursor has no slice declaration".to_owned(),
+        )
+    })
+}
+
+fn replay_block_by_path_mut<'a>(
+    file: &'a mut File,
+    path: &[BlockPathSegment],
+    span: Span,
+) -> Result<&'a mut BlockDecl, Diagnostic> {
+    let slice = replay_slice_mut(file, span)?;
+    replay_block_in_items_mut(&mut slice.items, path, span)
+}
+
+fn replay_block_in_items_mut<'a>(
+    items: &'a mut [BlockItem],
+    path: &[BlockPathSegment],
+    span: Span,
+) -> Result<&'a mut BlockDecl, Diagnostic> {
+    let Some((segment, rest)) = path.split_first() else {
+        return Err(replay_error(span, "revision op has an empty block_path"));
+    };
+    let Some(index) = items.iter().position(|item| match item {
+        BlockItem::Block(block) => block_matches_segment(block, segment),
+        BlockItem::Field(_) => false,
+    }) else {
+        return Err(replay_error(
+            span,
+            format!(
+                "block_path segment `{} {}` does not exist",
+                segment.kind, segment.name
+            ),
+        ));
+    };
+    let BlockItem::Block(block) = &mut items[index] else {
+        unreachable!("position only matches blocks");
+    };
+    if rest.is_empty() {
+        Ok(block)
+    } else {
+        replay_block_in_items_mut(&mut block.items, rest, span)
+    }
+}
+
+fn parse_replay_block(
+    kind: &str,
+    name: &str,
+    items: &[String],
+    span: Span,
+) -> Result<BlockDecl, Diagnostic> {
+    let mut source = String::new();
+    source.push_str("slice __replay {\n  ");
+    source.push_str(kind);
+    if !name.is_empty() {
+        source.push(' ');
+        source.push_str(name);
+    }
+    source.push_str(" {\n");
+    for item in items {
+        for line in item.lines() {
+            source.push_str("    ");
+            source.push_str(line);
+            source.push('\n');
+        }
+    }
+    source.push_str("  }\n}\n");
+
+    let parsed = parser::parse(&source);
+    if parsed.diagnostics.iter().any(is_error) {
+        return Err(replay_error(
+            span,
+            format!("add_block target `{kind} {name}` could not be parsed for replay"),
+        ));
+    }
+    parsed
+        .file
+        .slice
+        .and_then(|slice| {
+            slice.items.into_iter().find_map(|item| match item {
+                BlockItem::Block(block) => Some(block),
+                BlockItem::Field(_) => None,
+            })
+        })
+        .ok_or_else(|| replay_error(span, format!("add_block target `{kind} {name}` is empty")))
+}
+
+fn parse_replay_field_value(
+    field_name: &str,
+    value: &str,
+    span: Span,
+) -> Result<FieldValue, Diagnostic> {
+    let source =
+        format!("slice __replay {{\n  cell __holder {{\n    {field_name}: {value}\n  }}\n}}\n");
+    let parsed = parser::parse(&source);
+    if parsed.diagnostics.iter().any(is_error) {
+        return Err(replay_error(
+            span,
+            format!("field `{field_name}` value `{value}` could not be parsed for replay"),
+        ));
+    }
+    let Some(slice) = parsed.file.slice else {
+        return Err(replay_error(span, "field replay parser returned no slice"));
+    };
+    let Some(BlockItem::Block(block)) = slice.items.into_iter().next() else {
+        return Err(replay_error(
+            span,
+            "field replay parser returned no holder block",
+        ));
+    };
+    block
+        .items
+        .into_iter()
+        .find_map(|item| match item {
+            BlockItem::Field(field) if field.key.name == field_name => Some(field.value),
+            _ => None,
+        })
+        .ok_or_else(|| replay_error(span, format!("field `{field_name}` value did not replay")))
+}
+
+fn reorder_child_blocks(
+    block: &mut BlockDecl,
+    new_order: &[String],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let target_kind = if block.kind.name == "event" {
+        Some("step".to_owned())
+    } else {
+        child_kind_for_order(block, new_order)
+    };
+    let Some(target_kind) = target_kind else {
+        return Err(replay_error(
+            span,
+            "reorder_items did not match any child blocks",
+        ));
+    };
+
+    let existing_order = child_order(block, &target_kind);
+    let existing_set: BTreeSet<&String> = existing_order.iter().collect();
+    let new_set: BTreeSet<&String> = new_order.iter().collect();
+    if existing_set != new_set {
+        return Err(replay_error(
+            span,
+            format!(
+                "reorder_items new_order {:?} does not match existing `{target_kind}` children {:?}",
+                new_order, existing_order
+            ),
+        ));
+    }
+
+    let mut by_name: BTreeMap<String, BlockDecl> = BTreeMap::new();
+    for item in &block.items {
+        if let BlockItem::Block(child) = item {
+            if child.kind.name == target_kind {
+                by_name.insert(block_name_display(child), child.clone());
+            }
+        }
+    }
+    let mut ordered = new_order
+        .iter()
+        .filter_map(|name| by_name.remove(name))
+        .collect::<Vec<_>>()
+        .into_iter();
+    for item in &mut block.items {
+        if matches!(item, BlockItem::Block(child) if child.kind.name == target_kind) {
+            let Some(next) = ordered.next() else {
+                return Err(replay_error(
+                    span,
+                    "reorder_items exhausted ordered children during replay",
+                ));
+            };
+            *item = BlockItem::Block(next);
+        }
+    }
+    Ok(())
+}
+
+fn child_kind_for_order(block: &BlockDecl, new_order: &[String]) -> Option<String> {
+    let wanted: BTreeSet<&String> = new_order.iter().collect();
+    let mut by_kind: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for item in &block.items {
+        if let BlockItem::Block(child) = item {
+            by_kind
+                .entry(child.kind.name.clone())
+                .or_default()
+                .push(block_name_display(child));
+        }
+    }
+    by_kind.into_iter().find_map(|(kind, names)| {
+        let existing: BTreeSet<&String> = names.iter().collect();
+        (existing == wanted).then_some(kind)
+    })
+}
+
+fn empty_block(kind: &str, name: Option<BlockName>) -> BlockDecl {
+    BlockDecl {
+        span: Span::DUMMY,
+        kind: Ident {
+            span: Span::DUMMY,
+            name: kind.to_owned(),
+        },
+        name,
+        items: Vec::new(),
+    }
+}
+
+fn top_level_block_index(slice: &SliceDecl, kind: &str, name: &str) -> Option<usize> {
+    slice.items.iter().position(|item| match item {
+        BlockItem::Block(block) => block.kind.name == kind && block_name_display(block) == name,
+        BlockItem::Field(_) => false,
+    })
+}
+
+fn child_block_index(block: &BlockDecl, kind: &str, name: &str) -> Option<usize> {
+    block.items.iter().position(|item| match item {
+        BlockItem::Block(child) => child.kind.name == kind && block_name_display(child) == name,
+        BlockItem::Field(_) => false,
+    })
+}
+
+fn field_index(block: &BlockDecl, field_name: &str) -> Option<usize> {
+    block.items.iter().position(|item| match item {
+        BlockItem::Field(field) => field.key.name == field_name,
+        BlockItem::Block(_) => false,
+    })
+}
+
+fn block_matches_segment(block: &BlockDecl, segment: &BlockPathSegment) -> bool {
+    block.kind.name == segment.kind && block_name_display(block) == segment.name
+}
+
+fn reorder_targets_walk_path(path: &[BlockPathSegment]) -> bool {
+    path.iter().any(|segment| {
+        matches!(segment.kind.as_str(), "walk" | "walks")
+            || matches!(segment.name.as_str(), "walk" | "walks")
+    })
+}
+
+fn replay_error(span: Span, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::error(codes::E_REV_REPLAY_FAILED, span, message)
 }
 
 fn parse_revision_entry(block: &BlockDecl, out: &mut Vec<Diagnostic>) -> Option<InlineRevision> {
@@ -745,7 +1237,6 @@ fn parse_revision_entry(block: &BlockDecl, out: &mut Vec<Diagnostic>) -> Option<
         .and_then(|value| string_like(value, out))
         .unwrap_or_default();
     let author = field_value(block, "author").and_then(|value| string_like(value, out));
-    let source_snapshot = field_value(block, "source").and_then(|value| string_like(value, out));
     let ops = match required_field(block, "ops", out) {
         Some(FieldValue::List { items, .. }) => parse_ops(items, out),
         Some(value) => {
@@ -764,7 +1255,6 @@ fn parse_revision_entry(block: &BlockDecl, out: &mut Vec<Diagnostic>) -> Option<
 
     Some(InlineRevision {
         span: block.span,
-        source_snapshot,
         summary: RevisionSummary {
             revision_number,
             base_revision: revision_number.checked_sub(1).filter(|n| *n > 0),
@@ -841,7 +1331,6 @@ fn parse_op(
             source_hash: map_string(entries, "source_hash").unwrap_or_default(),
             byte_len: map_usize(entries, "byte_len").unwrap_or(0),
             line_count: map_usize(entries, "line_count").unwrap_or(0),
-            source: map_string(entries, "source"),
         }),
         "add_slice" => Some(SemanticPatchOp::AddSlice {
             id: map_string(entries, "id").unwrap_or_default(),
@@ -1196,10 +1685,6 @@ fn render_revision_entry(revision: &RevisionToRender, depth: usize) -> String {
         out.push_str(&quote_string(author));
         out.push('\n');
     }
-    out.push_str(&inner);
-    out.push_str("source: ");
-    out.push_str(&quote_string(&revision.source_snapshot));
-    out.push('\n');
     out.push_str(&indent);
     out.push_str("}\n");
     out
@@ -1211,19 +1696,10 @@ fn render_op_map(op: &SemanticPatchOp) -> String {
             source_hash,
             byte_len,
             line_count,
-            source,
-        } => {
-            let mut parts = vec![
-                r#"op: "genesis_from_materialized_view""#.to_owned(),
-                format!("source_hash: {}", quote_string(source_hash)),
-                format!("byte_len: {byte_len}"),
-                format!("line_count: {line_count}"),
-            ];
-            if let Some(source) = source {
-                parts.push(format!("source: {}", quote_string(source)));
-            }
-            format!("{{ {} }}", parts.join(", "))
-        }
+        } => format!(
+            r#"{{ op: "genesis_from_materialized_view", source_hash: {}, byte_len: {byte_len}, line_count: {line_count} }}"#,
+            quote_string(source_hash)
+        ),
         SemanticPatchOp::AddSlice { id, .. } => {
             format!(r#"{{ op: "add_slice", id: {} }}"#, quote_string(id))
         }

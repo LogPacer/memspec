@@ -41,8 +41,24 @@ fn q(value: &str) -> String {
     out
 }
 
+fn line_count(source: &str) -> usize {
+    if source.is_empty() {
+        return 0;
+    }
+    source.bytes().filter(|b| *b == b'\n').count() + usize::from(!source.ends_with('\n'))
+}
+
 fn base_source() -> &'static str {
     "slice s {\n  cell c { type: boolean mutable: true }\n}\n"
+}
+
+fn empty_projection() -> String {
+    "slice s {\n}\n".to_owned()
+}
+
+fn add_base_cell_op() -> String {
+    r#"{ op: "add_block", kind: "cell", name: "c", items: ["type: boolean", "mutable: true"] }"#
+        .to_owned()
 }
 
 fn source_with_revisions(entries: &str) -> String {
@@ -51,19 +67,10 @@ fn source_with_revisions(entries: &str) -> String {
     )
 }
 
-fn revision_entry(
-    revision: u64,
-    base_hash: Option<&str>,
-    result_hash: &str,
-    ops: &str,
-    source: Option<&str>,
-) -> String {
+fn revision_entry(revision: u64, base_hash: Option<&str>, result_hash: &str, ops: &str) -> String {
     let base = base_hash.map_or_else(|| "null".to_owned(), q);
-    let source_field = source.map_or_else(String::new, |source| {
-        format!("      source: {}\n", q(source))
-    });
     format!(
-        "    revision {revision} {{\n      base_hash: {base}\n      result_hash: {}\n      ops: [{ops}]\n      reason: \"test\"\n{source_field}    }}\n",
+        "    revision {revision} {{\n      base_hash: {base}\n      result_hash: {}\n      ops: [{ops}]\n      reason: \"test\"\n    }}\n",
         q(result_hash),
     )
 }
@@ -71,12 +78,21 @@ fn revision_entry(
 #[test]
 fn parser_round_trips_revisions_block_fixture() {
     let (projection, hash) = projection_and_hash(base_source());
+    let empty = empty_projection();
+    let empty_hash = source_sha256(&empty);
     let op = format!(
-        "{{ op: \"genesis_from_materialized_view\", source_hash: {}, byte_len: {}, line_count: 1 }}",
-        q(&hash),
-        projection.len()
+        "{{ op: \"genesis_from_materialized_view\", source_hash: {}, byte_len: {}, line_count: {} }}",
+        q(&empty_hash),
+        empty.len(),
+        line_count(&empty),
     );
-    let source = source_with_revisions(&revision_entry(1, None, &hash, &op, Some(&projection)));
+    let entries = format!(
+        "{}{}",
+        revision_entry(1, None, &empty_hash, &op),
+        revision_entry(2, Some(&empty_hash), &hash, &add_base_cell_op()),
+    );
+    assert_ne!(projection, empty);
+    let source = source_with_revisions(&entries);
 
     let diagnostics = analyze_source(&source);
     assert!(
@@ -89,17 +105,16 @@ fn parser_round_trips_revisions_block_fixture() {
 
 #[test]
 fn analyzer_rejects_chain_break() {
-    let (projection, hash) = projection_and_hash(base_source());
+    let (_, hash) = projection_and_hash(base_source());
     let bad_base = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     let entries = format!(
         "{}{}",
-        revision_entry(1, None, bad_base, "", None),
+        revision_entry(1, None, bad_base, ""),
         revision_entry(
             2,
             Some("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
             &hash,
             "",
-            Some(&projection)
         ),
     );
     let diagnostics = analyze_source(&source_with_revisions(&entries));
@@ -121,14 +136,12 @@ fn analyzer_rejects_number_gap_duplicate_and_missing_genesis() {
                 None,
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111",
                 "",
-                None
             ),
             revision_entry(
                 3,
                 Some("sha256:1111111111111111111111111111111111111111111111111111111111111111"),
                 &hash,
                 "",
-                None
             ),
         ),
         format!(
@@ -138,21 +151,18 @@ fn analyzer_rejects_number_gap_duplicate_and_missing_genesis() {
                 None,
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111",
                 "",
-                None
             ),
             revision_entry(
                 2,
                 Some("sha256:1111111111111111111111111111111111111111111111111111111111111111"),
                 "sha256:2222222222222222222222222222222222222222222222222222222222222222",
                 "",
-                None
             ),
             revision_entry(
                 2,
                 Some("sha256:2222222222222222222222222222222222222222222222222222222222222222"),
                 &hash,
                 "",
-                None
             ),
         ),
         format!(
@@ -162,14 +172,12 @@ fn analyzer_rejects_number_gap_duplicate_and_missing_genesis() {
                 Some("sha256:1111111111111111111111111111111111111111111111111111111111111111"),
                 "sha256:2222222222222222222222222222222222222222222222222222222222222222",
                 "",
-                None
             ),
             revision_entry(
                 3,
                 Some("sha256:2222222222222222222222222222222222222222222222222222222222222222"),
                 &hash,
                 "",
-                None
             ),
         ),
     ] {
@@ -186,7 +194,7 @@ fn analyzer_rejects_terminal_hash_mismatch() {
     let (_, hash) = projection_and_hash(base_source());
     let wrong_hash = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     assert_ne!(hash, wrong_hash);
-    let source = source_with_revisions(&revision_entry(1, None, wrong_hash, "", None));
+    let source = source_with_revisions(&revision_entry(1, None, wrong_hash, ""));
     let diagnostics = analyze_source(&source);
 
     assert!(
@@ -198,15 +206,25 @@ fn analyzer_rejects_terminal_hash_mismatch() {
 #[test]
 fn analyzer_warns_when_revisions_block_exceeds_threshold() {
     let (_, projection_hash) = projection_and_hash(base_source());
+    let empty = empty_projection();
+    let empty_hash = source_sha256(&empty);
+    let genesis_op = format!(
+        "{{ op: \"genesis_from_materialized_view\", source_hash: {}, byte_len: {}, line_count: {} }}",
+        q(&empty_hash),
+        empty.len(),
+        line_count(&empty),
+    );
     let mut entries = String::new();
     let mut previous: Option<String> = None;
     for n in 1..=201_u64 {
-        let result = if n == 201 {
-            projection_hash.clone()
+        let (result, ops) = if n == 1 {
+            (empty_hash.clone(), genesis_op.clone())
+        } else if n == 201 {
+            (projection_hash.clone(), add_base_cell_op())
         } else {
-            format!("sha256:{n:064x}")
+            (empty_hash.clone(), String::new())
         };
-        entries.push_str(&revision_entry(n, previous.as_deref(), &result, "", None));
+        entries.push_str(&revision_entry(n, previous.as_deref(), &result, &ops));
         previous = Some(result);
     }
     let diagnostics = analyze_source(&source_with_revisions(&entries));
@@ -227,9 +245,7 @@ fn analyzer_warns_when_revisions_block_exceeds_threshold() {
 fn walks_reorder_is_rejected() {
     let (_, hash) = projection_and_hash(base_source());
     let op = r#"{ op: "reorder_items", block_path: [{ kind: "walks", name: "" }], new_order: ["2", "1"] }"#;
-    let diagnostics = analyze_source(&source_with_revisions(&revision_entry(
-        1, None, &hash, op, None,
-    )));
+    let diagnostics = analyze_source(&source_with_revisions(&revision_entry(1, None, &hash, op)));
 
     assert!(
         has_code(&diagnostics, codes::E_REV_REORDER_FORBIDDEN_ON_WALKS),

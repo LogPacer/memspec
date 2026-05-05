@@ -34,6 +34,13 @@ memspec query <spec-file> --refs-to <cell-id>
 
 Be able to restate the full state graph before editing code.
 
+## Read Discipline
+
+- Prefer focused CLI queries over manual code search: `memspec query <file> --by-id <id>`, `--refs-to <id>`, `--gaps`. Spec-side facts come from the parser, not from grep.
+- Read code with `offset`/`limit` line ranges — never whole files. Default Read pulls 2000 lines.
+- Use `grep -l` to find files, then read targeted ranges. Never dump full file contents into context.
+- If the working environment exposes a code-indexing tool (project codemap, language-server query, repo graph), prefer it for symbol/usage lookups before falling back to Grep/Read.
+
 ## Implementation Rules
 
 - For each cell, enumerate the spec's declared mutation paths with `memspec query --refs-to`.

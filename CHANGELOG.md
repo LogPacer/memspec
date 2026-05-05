@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Read-discipline section added to `spec-writer`, `spec-scrutinizer`, `spec-implementer`, `spec-reviewer` (Claude) and the matching `memspec-author`, `memspec-scrutinize`, `memspec-implement`, `memspec-review` skills (Codex). Pushes agents toward `memspec query` over grep for spec-side facts, range-scoped Read over whole-file pulls, and forward-compatible use of code-indexing tools (project codemap, LSP, repo graph) when available. Cuts per-roundtrip token cost on real codebases.
+
 ## [0.3.0] - 2026-05-05
 
 ### Added

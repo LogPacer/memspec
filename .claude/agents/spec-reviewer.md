@@ -17,6 +17,13 @@ Run the test suite (`cargo test` / `bin/rails test`). If anything fails or `mems
 
 Composition warnings (`W0273-W0275`) are advisory; surface but do not auto-REJECT.
 
+# Read discipline
+
+- Prefer focused CLI queries over manual code search: `memspec query <file> --by-id <id>`, `--refs-to <id>`, `--gaps`. Spec-side facts come from the parser, not from grep.
+- Read code with `offset` / `limit` line ranges — never whole files. Default Read pulls 2000 lines.
+- Use `grep -l` to find files, then Read targeted ranges. Never dump full file contents into context.
+- If the working environment exposes a code-indexing tool (project codemap, language-server query, repo graph), prefer it for symbol/usage lookups before falling back to Grep/Read. Bypass-detection scans especially benefit.
+
 # Substantive checks
 
 REJECT for any of:

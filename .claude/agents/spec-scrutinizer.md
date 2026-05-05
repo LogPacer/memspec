@@ -59,6 +59,13 @@ memspec diff <file> --from N --to M          # walk provenance check
 
 Plus `Grep`/`Glob`/`Read` for cross-referencing claims against the codebase, `Bash` for `cargo test` / `bin/rails test` to verify behavioural kill-tests.
 
+# Read discipline
+
+- Prefer focused CLI queries over manual code search: `memspec query <file> --by-id <id>`, `--refs-to <id>`, `--gaps`. Spec-side facts come from the parser, not from grep.
+- Read code with `offset` / `limit` line ranges — never whole files. Default Read pulls 2000 lines.
+- Use `grep -l` to find files, then Read targeted ranges. Never dump full file contents into context.
+- If the working environment exposes a code-indexing tool (project codemap, language-server query, repo graph), prefer it for symbol/usage lookups before falling back to Grep/Read. Bypass-site surveys especially benefit — a codemap can enumerate write-sites the language-specific grep patterns above are designed to catch.
+
 # Output
 
 Write to `<spec-path>-scrutiny.md`:

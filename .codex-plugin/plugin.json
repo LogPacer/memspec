@@ -1,6 +1,6 @@
 {
   "name": "memspec",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Discipline-enforcing spec framework: native .memspec DSL + pure-Rust toolchain + agent layer for coupled-state work.",
   "author": {
     "name": "LogPacer",

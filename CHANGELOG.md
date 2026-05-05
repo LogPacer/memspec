@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-05
+
 ### Added
 
 - `spec-synthesizer` agent and `/memspec-revise` slash command (Claude) plus the matching `memspec-synthesize` skill and `/memspec-revise` prompt (Codex). Drives `memspec experimental synthesize-revision` to append inline revisions hash-chained against the prior `result_hash`, with replay-validation on the rewritten file.
@@ -62,6 +64,7 @@ First public release.
 
 - Architecture inspired by [allium-tools](https://github.com/juxt/allium-tools) (JUXT, MIT 2026): hand-rolled lexer style, uniform `BlockDecl { kind, name, items }` AST shape, span-bearing diagnostic format. No code dependency; attribution preserved in `NOTICE`.
 
-[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/LogPacer/memspec/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LogPacer/memspec/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LogPacer/memspec/releases/tag/v0.1.0

@@ -49,6 +49,20 @@ Re-litigate only with concrete cause.
 - **Allium-tools is read-only inspiration.** Architectural patterns only (lexer style, `BlockDecl { kind, name, items }` AST shape, span-bearing diagnostics). Never `Cargo.toml`-depend on it. MIT attribution preserved in `NOTICE`.
 - **Agent dispatch via `general-purpose`: paste the agent's prompt INLINE.** Do NOT tell the dispatched agent to `Read` its own prompt file — `~/.claude/agents/<name>.md` resolves to a path outside the session's working roots and Read denies it. Native invocation via `Task(subagent_type=...)` or via slash commands loads the system prompt directly.
 
+## Release process
+
+Releases are driven by `mise.toml` tasks: `release:build` → `release:tag <ver>` → `release:publish <ver>`. Cargo `version`, `.claude-plugin/plugin.json` `version`, and `.codex-plugin/plugin.json` `version` must all match the release tag.
+
+**Always bump the marketplace pin alongside.** memspec ships through `LogPacer/mempacer-marketplace`, which pins the tag users actually install. After publishing a memspec release, update the sibling repo (typically `/Users/mhl/projects/mempacer-marketplace/`):
+
+- `.claude-plugin/marketplace.json` — `plugins[0].version` + `plugins[0].source.ref` + `metadata.version`. Update `plugins[0].description` if the agent surface changed (added/removed an agent).
+- `.agents/plugins/marketplace.json` — `plugins[0].source.ref`.
+- `README.md` — plugin table version + description.
+
+Without that bump, plugin users on `/plugin marketplace upgrade` (Claude) or `codex plugin marketplace upgrade mempacer` (Codex) won't see the new release. The marketplace is the install surface, not this repo.
+
+Semver discipline: agent surface or CLI changes are MINOR, prompt-only or doc-only fixes are PATCH. Pre-1.0 grammar changes may land in MINOR per `CHANGELOG.md` header.
+
 ## Required reading before non-trivial parser/analyzer work
 
 - `README.md` — user-facing overview.

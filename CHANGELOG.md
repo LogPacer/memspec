@@ -6,9 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-05
+
 ### Changed
 
 - Read-discipline section added to `spec-writer`, `spec-scrutinizer`, `spec-implementer`, `spec-reviewer` (Claude) and the matching `memspec-author`, `memspec-scrutinize`, `memspec-implement`, `memspec-review` skills (Codex). Pushes agents toward `memspec query` over grep for spec-side facts, range-scoped Read over whole-file pulls, and forward-compatible use of code-indexing tools (project codemap, LSP, repo graph) when available. Cuts per-roundtrip token cost on real codebases.
+- `CLAUDE.md` documents the release process and reminds Claude/Codex sessions to bump the `mempacer-marketplace` pin whenever a memspec release ships.
 
 ## [0.3.0] - 2026-05-05
 
@@ -68,7 +71,8 @@ First public release.
 
 - Architecture inspired by [allium-tools](https://github.com/juxt/allium-tools) (JUXT, MIT 2026): hand-rolled lexer style, uniform `BlockDecl { kind, name, items }` AST shape, span-bearing diagnostic format. No code dependency; attribution preserved in `NOTICE`.
 
-[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/LogPacer/memspec/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/LogPacer/memspec/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/LogPacer/memspec/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LogPacer/memspec/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LogPacer/memspec/releases/tag/v0.1.0

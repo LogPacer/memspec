@@ -71,7 +71,7 @@ pub struct RevisionSummary {
     pub ops: Vec<SemanticPatchOp>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, Default)]
 pub struct ProjectionSummary {
     pub imports: usize,
     pub walks: usize,
@@ -248,6 +248,10 @@ pub fn build_genesis_revision(
 /// The caller is responsible for durable file I/O. Keeping this function
 /// pure lets the CLI perform tempfile+rename+fsync while tests can exercise
 /// the synthesis logic without touching disk.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Keep the ordered parse, append, and replay validation together."
+)]
 pub fn synthesize_revision_source(
     source: &str,
     source_path: Option<String>,
@@ -290,24 +294,24 @@ pub fn synthesize_revision_source(
         collect_projection(slice, &mut projection_summary, &mut sink);
     }
 
-    if let Some(last) = chain.revisions.last() {
-        if last.summary.result_hash == projection_hash {
-            let report = RevisionAppendReport {
-                schema_version: REVISION_MANIFEST_VERSION.to_owned(),
-                source_path,
-                slice: file.slice.as_ref().map(|s| s.name.name.clone()),
-                appended: false,
-                no_op: true,
-                message: "no semantic change - no revision appended".to_owned(),
-                revisions: chain.revisions.into_iter().map(|r| r.summary).collect(),
-                projection: projection_summary,
-                file_size: source.len(),
-            };
-            return Ok(RevisionSynthesis {
-                new_source: source.to_owned(),
-                report,
-            });
-        }
+    if let Some(last) = chain.revisions.last()
+        && last.summary.result_hash == projection_hash
+    {
+        let report = RevisionAppendReport {
+            schema_version: REVISION_MANIFEST_VERSION.to_owned(),
+            source_path,
+            slice: file.slice.as_ref().map(|s| s.name.name.clone()),
+            appended: false,
+            no_op: true,
+            message: "no semantic change - no revision appended".to_owned(),
+            revisions: chain.revisions.into_iter().map(|r| r.summary).collect(),
+            projection: projection_summary,
+            file_size: source.len(),
+        };
+        return Ok(RevisionSynthesis {
+            new_source: source.to_owned(),
+            report,
+        });
     }
 
     let reason = if reason.is_empty() {
@@ -433,8 +437,7 @@ pub fn synthesize_revision_source(
             "appended revision {}",
             appended
                 .last()
-                .map(|revision| revision.summary.revision_number)
-                .unwrap_or(0)
+                .map_or(0, |revision| revision.summary.revision_number)
         ),
         revisions: appended.into_iter().map(|r| r.summary).collect(),
         projection: projection_summary,
@@ -549,23 +552,6 @@ pub fn source_sha256(source: &str) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
-impl Default for ProjectionSummary {
-    fn default() -> Self {
-        Self {
-            imports: 0,
-            walks: 0,
-            cells: 0,
-            derived: 0,
-            associations: 0,
-            events: 0,
-            steps: 0,
-            post_failures: 0,
-            forbidden_states: 0,
-            kill_tests: 0,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 enum TerminalCheck {
     RequireCurrentProjection,
@@ -577,6 +563,10 @@ struct RevisionToRender {
     summary: RevisionSummary,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Keep revision-chain invariants in their validation order."
+)]
 fn validate_inline_revision_chain(
     file: &File,
     revisions: &[InlineRevision],
@@ -737,6 +727,10 @@ fn replay_revisions(file: &File, revisions: &[InlineRevision]) -> Result<String,
     Ok(canonical_source_projection(&replay_file))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Keep the exhaustive semantic-operation dispatch together."
+)]
 fn apply_revision_op(file: &mut File, op: &SemanticPatchOp, span: Span) -> Result<(), Diagnostic> {
     match op {
         SemanticPatchOp::GenesisFromMaterializedView {
@@ -1102,18 +1096,17 @@ fn reorder_child_blocks(
         return Err(replay_error(
             span,
             format!(
-                "reorder_items new_order {:?} does not match existing `{target_kind}` children {:?}",
-                new_order, existing_order
+                "reorder_items new_order {new_order:?} does not match existing `{target_kind}` children {existing_order:?}"
             ),
         ));
     }
 
     let mut by_name: BTreeMap<String, BlockDecl> = BTreeMap::new();
     for item in &block.items {
-        if let BlockItem::Block(child) = item {
-            if child.kind.name == target_kind {
-                by_name.insert(block_name_display(child), child.clone());
-            }
+        if let BlockItem::Block(child) = item
+            && child.kind.name == target_kind
+        {
+            by_name.insert(block_name_display(child), child.clone());
         }
     }
     let mut ordered = new_order
@@ -1580,7 +1573,7 @@ fn diff_nested_step_fields(
             },
             BlockPathSegment {
                 kind: "step".to_owned(),
-                name: (*step_name).to_owned(),
+                name: (*step_name).clone(),
             },
         ];
         diff_block_fields(&path, before_step, after_step, ops);
@@ -1773,7 +1766,7 @@ fn render_block_path(path: &[BlockPathSegment]) -> String {
     path.iter()
         .map(|segment| {
             format!(
-                r#"{{ kind: {}, name: {} }}"#,
+                r"{{ kind: {}, name: {} }}",
                 quote_string(&segment.kind),
                 quote_string(&segment.name)
             )
@@ -2000,8 +1993,7 @@ fn empty_projection_for_file(file: &File) -> String {
     let name = file
         .slice
         .as_ref()
-        .map(|slice| slice.name.name.as_str())
-        .unwrap_or("unnamed");
+        .map_or("unnamed", |slice| slice.name.name.as_str());
     format!("slice {name} {{\n}}\n")
 }
 
@@ -2043,7 +2035,7 @@ fn fields_by_name(block: &BlockDecl) -> BTreeMap<&str, &Field> {
         .iter()
         .filter_map(|item| match item {
             BlockItem::Field(field) => Some((field.key.name.as_str(), field)),
-            _ => None,
+            BlockItem::Block(_) => None,
         })
         .collect()
 }
@@ -2103,9 +2095,9 @@ fn render_block(block: &BlockDecl, depth: usize, out: &mut String) {
     out.push_str(&indent);
     out.push_str(&block.kind.name);
     match &block.name {
-        Some(BlockName::Ident(ident)) => {
+        Some(BlockName::Ident(identifier)) => {
             out.push(' ');
-            out.push_str(&ident.name);
+            out.push_str(&identifier.name);
         }
         Some(BlockName::Int { value, .. }) => {
             out.push(' ');

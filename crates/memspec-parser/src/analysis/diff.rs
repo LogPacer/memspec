@@ -15,7 +15,7 @@ use serde::Serialize;
 use crate::ast::{BlockDecl, BlockItem, BlockName, FieldValue, File};
 use crate::span::Span;
 
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Serialize, schemars::JsonSchema)]
 pub struct DiffReport {
     pub slice: Option<String>,
     pub from: i64,
@@ -55,50 +55,34 @@ pub fn diff(file: &File, from: i64, to: i64) -> Result<DiffReport, String> {
     if from > to {
         return Err(format!("invalid range: from={from} > to={to}"));
     }
+    let mut report = DiffReport {
+        slice: file.slice.as_ref().map(|slice| slice.name.name.clone()),
+        from,
+        to,
+        ..DiffReport::default()
+    };
     let Some(slice) = &file.slice else {
-        return Ok(DiffReport {
-            slice: None,
-            from,
-            to,
-            walks_in_range: Vec::new(),
-            added: Vec::new(),
-            changed: Vec::new(),
-            killed: Vec::new(),
-            superseded: Vec::new(),
-            steps_added: Vec::new(),
-        });
+        return Ok(report);
     };
 
     // Slice-level default walk — used when a clause omits walk_added.
     let default_walk = slice_default_walk(slice).unwrap_or(1);
 
-    let mut report = DiffReport {
-        slice: Some(slice.name.name.clone()),
-        from,
-        to,
-        walks_in_range: Vec::new(),
-        added: Vec::new(),
-        changed: Vec::new(),
-        killed: Vec::new(),
-        superseded: Vec::new(),
-        steps_added: Vec::new(),
-    };
-
     for item in &slice.items {
         let BlockItem::Block(b) = item else { continue };
         match b.kind.name.as_str() {
             "walk" => {
-                if let Some(BlockName::Int { value, .. }) = &b.name {
-                    if in_range(*value, from, to) {
-                        report.walks_in_range.push(WalkSummary {
-                            walk: *value,
-                            summary: string_field(b, "summary"),
-                        });
-                    }
+                if let Some(BlockName::Int { value, .. }) = &b.name
+                    && in_range(*value, from, to)
+                {
+                    report.walks_in_range.push(WalkSummary {
+                        walk: *value,
+                        summary: string_field(b, "summary"),
+                    });
                 }
             }
-            kind @ ("cell" | "derived" | "association" | "event"
-                | "post_failure" | "forbidden_state" | "kill_test") => {
+            kind @ ("cell" | "derived" | "association" | "event" | "post_failure"
+            | "forbidden_state" | "kill_test") => {
                 let id = block_name_str(b).unwrap_or("<anon>").to_owned();
                 let span = b.span;
 
@@ -112,38 +96,38 @@ pub fn diff(file: &File, from: i64, to: i64) -> Result<DiffReport, String> {
                         parent: None,
                     });
                 }
-                if let Some(changed) = explicit_walk(b, "walk_changed") {
-                    if in_range(changed, from, to) {
-                        report.changed.push(DiffEntry {
-                            kind: kind.to_owned(),
-                            id: id.clone(),
-                            walk: changed,
-                            span,
-                            parent: None,
-                        });
-                    }
+                if let Some(changed) = explicit_walk(b, "walk_changed")
+                    && in_range(changed, from, to)
+                {
+                    report.changed.push(DiffEntry {
+                        kind: kind.to_owned(),
+                        id: id.clone(),
+                        walk: changed,
+                        span,
+                        parent: None,
+                    });
                 }
-                if let Some(killed) = explicit_walk(b, "walk_killed") {
-                    if in_range(killed, from, to) {
-                        report.killed.push(DiffEntry {
-                            kind: kind.to_owned(),
-                            id: id.clone(),
-                            walk: killed,
-                            span,
-                            parent: None,
-                        });
-                    }
+                if let Some(killed) = explicit_walk(b, "walk_killed")
+                    && in_range(killed, from, to)
+                {
+                    report.killed.push(DiffEntry {
+                        kind: kind.to_owned(),
+                        id: id.clone(),
+                        walk: killed,
+                        span,
+                        parent: None,
+                    });
                 }
-                if let Some(superseded) = explicit_walk(b, "walk_superseded") {
-                    if in_range(superseded, from, to) {
-                        report.superseded.push(DiffEntry {
-                            kind: kind.to_owned(),
-                            id: id.clone(),
-                            walk: superseded,
-                            span,
-                            parent: None,
-                        });
-                    }
+                if let Some(superseded) = explicit_walk(b, "walk_superseded")
+                    && in_range(superseded, from, to)
+                {
+                    report.superseded.push(DiffEntry {
+                        kind: kind.to_owned(),
+                        id: id.clone(),
+                        walk: superseded,
+                        span,
+                        parent: None,
+                    });
                 }
 
                 // Steps inside events get their own provenance.
@@ -186,12 +170,11 @@ fn slice_default_walk(slice: &crate::ast::SliceDecl) -> Option<i64> {
     // clauses to the most recent.)
     let mut max = None;
     for item in &slice.items {
-        if let BlockItem::Block(b) = item {
-            if b.kind.name == "walk" {
-                if let Some(BlockName::Int { value, .. }) = &b.name {
-                    max = Some(max.map_or(*value, |m: i64| m.max(*value)));
-                }
-            }
+        if let BlockItem::Block(b) = item
+            && b.kind.name == "walk"
+            && let Some(BlockName::Int { value, .. }) = &b.name
+        {
+            max = Some(max.map_or(*value, |m: i64| m.max(*value)));
         }
     }
     max

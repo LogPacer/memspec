@@ -8,7 +8,7 @@
 //! mode the original Allium spec missed for the mTLS reload.
 //!
 //! Additionally, when `event.atomicity ∈ {transactional, db_transaction}`,
-//! the post_failure row must distinguish `cells_after_pre_rollback` from
+//! the `post_failure` row must distinguish `cells_after_pre_rollback` from
 //! `cells_after_rollback`.
 
 use std::collections::HashMap;
@@ -36,11 +36,15 @@ pub fn run(file: &File, out: &mut Vec<Diagnostic>) {
     }
 
     for item in &slice.items {
-        let BlockItem::Block(event) = item else { continue };
+        let BlockItem::Block(event) = item else {
+            continue;
+        };
         if event.kind.name != "event" {
             continue;
         }
-        let Some(event_name) = block_name(event) else { continue };
+        let Some(event_name) = block_name(event) else {
+            continue;
+        };
 
         // Collect ordered steps with their relevant flags.
         let steps: Vec<(&Ident, &BlockDecl)> = event
@@ -60,9 +64,7 @@ pub fn run(file: &File, out: &mut Vec<Diagnostic>) {
             continue; // Rule applies only when ≥2 steps are fallible.
         }
 
-        let atomicity = field_ident(event, "atomicity")
-            .map(|i| i.name.as_str())
-            .unwrap_or("none");
+        let atomicity = field_ident(event, "atomicity").map_or("none", |i| i.name.as_str());
         let needs_rollback_pair = matches!(atomicity, "db_transaction" | "transactional");
 
         for (i, (step_name, step_block)) in steps.iter().enumerate() {
@@ -157,15 +159,24 @@ fn field_ident<'a>(block: &'a BlockDecl, key: &str) -> Option<&'a Ident> {
 }
 
 fn field_is_true(block: &BlockDecl, key: &str) -> bool {
-    matches!(field_value(block, key), Some(FieldValue::Bool { value: true, .. }))
+    matches!(
+        field_value(block, key),
+        Some(FieldValue::Bool { value: true, .. })
+    )
 }
 
 fn has_field(block: &BlockDecl, key: &str) -> bool {
-    block.items.iter().any(|item| matches!(item, BlockItem::Field(f) if f.key.name == key))
+    block
+        .items
+        .iter()
+        .any(|item| matches!(item, BlockItem::Field(f) if f.key.name == key))
 }
 
 fn has_block(block: &BlockDecl, kind: &str) -> bool {
-    block.items.iter().any(|item| matches!(item, BlockItem::Block(b) if b.kind.name == kind))
+    block
+        .items
+        .iter()
+        .any(|item| matches!(item, BlockItem::Block(b) if b.kind.name == kind))
 }
 
 #[allow(dead_code)]
@@ -198,7 +209,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(d.iter().all(|d| d.code != codes::E_SYMFAIL_MISSING_POST_FAILURE));
+        assert!(
+            d.iter()
+                .all(|d| d.code != codes::E_SYMFAIL_MISSING_POST_FAILURE)
+        );
     }
 
     #[test]
@@ -215,7 +229,8 @@ mod tests {
             }"#,
         );
         assert!(
-            d.iter().any(|d| d.code == codes::E_SYMFAIL_MISSING_POST_FAILURE),
+            d.iter()
+                .any(|d| d.code == codes::E_SYMFAIL_MISSING_POST_FAILURE),
             "expected missing-post_failure diagnostic, got: {d:#?}"
         );
     }
@@ -263,7 +278,8 @@ mod tests {
             }"#,
         );
         assert!(
-            d.iter().any(|d| d.code == codes::E_SYMFAIL_MISSING_ROLLBACK_PAIR),
+            d.iter()
+                .any(|d| d.code == codes::E_SYMFAIL_MISSING_ROLLBACK_PAIR),
             "expected missing-rollback-pair diagnostic, got: {d:#?}"
         );
     }
@@ -287,7 +303,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(d.iter().all(|d| d.code != codes::E_SYMFAIL_MISSING_ROLLBACK_PAIR));
+        assert!(
+            d.iter()
+                .all(|d| d.code != codes::E_SYMFAIL_MISSING_ROLLBACK_PAIR)
+        );
     }
 
     #[test]
@@ -309,6 +328,9 @@ mod tests {
             }"#,
         );
         // s1 is the first fallible step — no symmetric-failure row needed.
-        assert!(d.iter().all(|d| d.code != codes::E_SYMFAIL_MISSING_POST_FAILURE));
+        assert!(
+            d.iter()
+                .all(|d| d.code != codes::E_SYMFAIL_MISSING_POST_FAILURE)
+        );
     }
 }

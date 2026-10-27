@@ -42,7 +42,9 @@ pub fn render_markdown(file: &File) -> String {
 }
 
 fn render_meta_section(slice: &SliceDecl, out: &mut String) {
-    let Some(meta) = anonymous_block(slice, "meta") else { return };
+    let Some(meta) = anonymous_block(slice, "meta") else {
+        return;
+    };
     let _ = writeln!(out, "## Meta\n");
     for item in &meta.items {
         if let BlockItem::Field(f) = item {
@@ -96,10 +98,12 @@ fn render_cells_section(slice: &SliceDecl, out: &mut String) {
     let _ = writeln!(out, "## Cells\n");
     for c in cells {
         let id = block_name_or(c, "?");
-        let ty = field_value(c, "type")
-            .map(value_inline)
-            .unwrap_or_else(|| "(no type)".to_owned());
-        let mutability = if field_is_true(c, "mutable") { "mutable" } else { "immutable" };
+        let ty = field_value(c, "type").map_or_else(|| "(no type)".to_owned(), value_inline);
+        let mutability = if field_is_true(c, "mutable") {
+            "mutable"
+        } else {
+            "immutable"
+        };
         let _ = writeln!(out, "- **`{id}`** — `{ty}` ({mutability})");
         if let Some(default) = field_value(c, "default") {
             let _ = writeln!(out, "  - default: `{}`", value_inline(default));
@@ -190,14 +194,22 @@ fn render_events_section(slice: &SliceDecl, out: &mut String) {
             for s in steps {
                 let sid = block_name_or(s, "?");
                 let op = string_field(s, "op").unwrap_or_else(|| "—".to_owned());
-                let fallible = if field_is_true(s, "fallible") { "yes" } else { "no" };
+                let fallible = if field_is_true(s, "fallible") {
+                    "yes"
+                } else {
+                    "no"
+                };
                 let mutates = list_field_inline(s, "mutates");
                 let precond = string_field(s, "precondition").unwrap_or_else(|| "—".to_owned());
                 let _ = writeln!(
                     out,
                     "| `{sid}` | `{}` | {fallible} | {} | {} |",
                     md_escape(&op),
-                    if mutates.is_empty() { "—".to_owned() } else { mutates },
+                    if mutates.is_empty() {
+                        "—".to_owned()
+                    } else {
+                        mutates
+                    },
                     md_escape(&precond),
                 );
             }
@@ -218,17 +230,16 @@ fn render_post_failure_section(slice: &SliceDecl, out: &mut String) {
         let step = field_ident_str(pf, "step").unwrap_or("?");
         let outcome = string_field(pf, "outcome").unwrap_or_else(|| "?".to_owned());
         let _ = writeln!(out, "### `{id}` — `{event}.{step}` → {}\n", quote(&outcome));
-        for variant in ["cells_after_pre_rollback", "cells_after_rollback", "cells_after"] {
+        for variant in [
+            "cells_after_pre_rollback",
+            "cells_after_rollback",
+            "cells_after",
+        ] {
             if let Some(b) = nested_block(pf, variant) {
                 let _ = writeln!(out, "- **{}:**", pretty_label(variant));
                 for item in &b.items {
                     if let BlockItem::Field(f) = item {
-                        let _ = writeln!(
-                            out,
-                            "  - `{}`: `{}`",
-                            f.key.name,
-                            value_inline(&f.value)
-                        );
+                        let _ = writeln!(out, "  - `{}`: `{}`", f.key.name, value_inline(&f.value));
                     }
                 }
             }
@@ -236,7 +247,9 @@ fn render_post_failure_section(slice: &SliceDecl, out: &mut String) {
         if let Some(result) = field_value(pf, "result") {
             let _ = writeln!(out, "- **result:** `{}`", value_inline(result));
         }
-        if let Some(FieldValue::List { items, .. }) = field_value(pf, "invariants_held_after_rollback") {
+        if let Some(FieldValue::List { items, .. }) =
+            field_value(pf, "invariants_held_after_rollback")
+        {
             let inv = list_idents_inline(items);
             if !inv.is_empty() {
                 let _ = writeln!(out, "- **invariants held after rollback:** {inv}");
@@ -257,7 +270,7 @@ fn render_forbidden_states_section(slice: &SliceDecl, out: &mut String) {
         let reach = field_ident_str(fs, "reachability").unwrap_or("?");
         let _ = writeln!(out, "### `{id}` — *{reach}*\n");
         if let Some(d) = string_field(fs, "description") {
-            let _ = writeln!(out, "{}\n", d);
+            let _ = writeln!(out, "{d}\n");
         }
         if let Some(p) = string_field(fs, "predicate") {
             let _ = writeln!(out, "- **predicate:** {}", quote(&p));
@@ -286,10 +299,7 @@ fn render_kill_tests_section(slice: &SliceDecl, out: &mut String) {
         let kind = field_ident_str(kt, "kind").unwrap_or("?");
         let status = field_ident_str(kt, "status").unwrap_or("declared");
         let forbidden = field_ident_str(kt, "forbidden").unwrap_or("?");
-        let _ = writeln!(
-            out,
-            "### `{id}` — kind: *{kind}*, status: *{status}*\n"
-        );
+        let _ = writeln!(out, "### `{id}` — kind: *{kind}*, status: *{status}*\n");
         let _ = writeln!(out, "- **forbidden:** `{forbidden}`");
         if let Some(a) = string_field(kt, "assertion") {
             let _ = writeln!(out, "- **assertion:** {}", quote(&a));
@@ -314,7 +324,11 @@ pub fn render_markdown_aggregate(ws: &WorkingSet) -> String {
     let _ = writeln!(out, "**Root:** `{}`\n", ws.root.display());
     let _ = writeln!(out, "## Slices in this working set\n");
     for lf in &ws.files {
-        let slug = lf.file.slice.as_ref().map(|s| s.name.name.clone()).unwrap_or_else(|| "<unnamed>".to_owned());
+        let slug = lf
+            .file
+            .slice
+            .as_ref()
+            .map_or_else(|| "<unnamed>".to_owned(), |s| s.name.name.clone());
         let marker = if lf.path == ws.root { " *(root)*" } else { "" };
         let _ = writeln!(out, "- `{slug}`{marker} — `{}`", lf.path.display());
     }
@@ -323,7 +337,9 @@ pub fn render_markdown_aggregate(ws: &WorkingSet) -> String {
     // Dependency graph (alias → imported slug).
     let _ = writeln!(out, "## Dependency graph\n");
     for lf in &ws.files {
-        let Some(slice) = &lf.file.slice else { continue };
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
         if slice.imports.is_empty() {
             continue;
         }
@@ -332,14 +348,18 @@ pub fn render_markdown_aggregate(ws: &WorkingSet) -> String {
             let target = lf
                 .imports_resolved
                 .get(import.alias.name.as_str())
-                .map(|p| {
-                    ws.files
-                        .iter()
-                        .find(|other| &other.path == p)
-                        .and_then(|other| other.file.slice.as_ref().map(|s| s.name.name.clone()))
-                        .unwrap_or_else(|| import.path.clone())
-                })
-                .unwrap_or_else(|| import.path.clone());
+                .map_or_else(
+                    || import.path.clone(),
+                    |p| {
+                        ws.files
+                            .iter()
+                            .find(|other| &other.path == p)
+                            .and_then(|other| {
+                                other.file.slice.as_ref().map(|s| s.name.name.clone())
+                            })
+                            .unwrap_or_else(|| import.path.clone())
+                    },
+                );
             let _ = writeln!(out, "  - `{}` → `{}`", import.alias.name, target);
         }
     }
@@ -348,7 +368,9 @@ pub fn render_markdown_aggregate(ws: &WorkingSet) -> String {
 
     // Per-slice rendering.
     for lf in &ws.files {
-        let Some(slice) = &lf.file.slice else { continue };
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
         let _ = writeln!(out, "# Slice: `{}`\n", slice.name.name);
         let _ = writeln!(out, "*File: `{}`*\n", lf.path.display());
 
@@ -389,7 +411,12 @@ pub fn render_mermaid(file: &File) -> String {
     for c in slot_blocks(slice, "cell") {
         let id = block_name_or(c, "?");
         let ty = field_value(c, "type").map(value_inline).unwrap_or_default();
-        let _ = writeln!(out, "  {}[(\"{id}<br/><i>{}</i>\")]", mid(id), mermaid_escape(&ty));
+        let _ = writeln!(
+            out,
+            "  {}[(\"{id}<br/><i>{}</i>\")]",
+            mid(id),
+            mermaid_escape(&ty)
+        );
     }
     for d in slot_blocks(slice, "derived") {
         let id = block_name_or(d, "?");
@@ -455,10 +482,10 @@ pub fn render_mermaid(file: &File) -> String {
                 let _ = writeln!(out, "  {} -.touches.-> {}", mid(id), mid(&key.name));
             }
         }
-        if let Some(FieldValue::Ident(kt_ref)) = field_value(fs, "kill_test") {
-            if kt_ref.name != "TODO" {
-                let _ = writeln!(out, "  {} ==kill==> {}", mid(&kt_ref.name), mid(id));
-            }
+        if let Some(FieldValue::Ident(kt_ref)) = field_value(fs, "kill_test")
+            && kt_ref.name != "TODO"
+        {
+            let _ = writeln!(out, "  {} ==kill==> {}", mid(&kt_ref.name), mid(id));
         }
     }
     for pf in slot_blocks(slice, "post_failure") {
@@ -506,58 +533,23 @@ pub fn render_mermaid_aggregate(ws: &WorkingSet) -> String {
 
     // Build slug → canonical-path map so we can resolve `<alias>.<id>` to
     // the target slice's slug for prefixing.
-    let mut path_to_slug: std::collections::BTreeMap<&std::path::Path, &str> = std::collections::BTreeMap::new();
+    let mut path_to_slug: std::collections::BTreeMap<&std::path::Path, &str> =
+        std::collections::BTreeMap::new();
     for lf in &ws.files {
         if let Some(s) = lf.file.slice.as_ref().map(|s| s.name.name.as_str()) {
             path_to_slug.insert(lf.path.as_path(), s);
         }
     }
 
-    // Per-slice subgraph: nodes only.
-    for lf in &ws.files {
-        let Some(slice) = &lf.file.slice else { continue };
-        let slug = slice.name.name.as_str();
-        let _ = writeln!(out, "  subgraph {}_box [\"slice {}\"]", mid(slug), slug);
-        for c in slot_blocks(slice, "cell") {
-            let id = block_name_or(c, "?");
-            let ty = field_value(c, "type").map(value_inline).unwrap_or_default();
-            let _ = writeln!(out, "    {}[(\"{id}<br/><i>{}</i>\")]", pmid(slug, id), mermaid_escape(&ty));
-        }
-        for d in slot_blocks(slice, "derived") {
-            let id = block_name_or(d, "?");
-            let _ = writeln!(out, "    {}{{{{\"{id}<br/>(derived)\"}}}}", pmid(slug, id));
-        }
-        for a in slot_blocks(slice, "association") {
-            let id = block_name_or(a, "?");
-            let _ = writeln!(out, "    {}[/\"{id}<br/>(invariant)\"\\]", pmid(slug, id));
-        }
-        for e in slot_blocks(slice, "event") {
-            let id = block_name_or(e, "?");
-            let _ = writeln!(out, "    {}([\"{id}<br/>(event)\"])", pmid(slug, id));
-        }
-        for fs in slot_blocks(slice, "forbidden_state") {
-            let id = block_name_or(fs, "?");
-            let reach = field_ident_str(fs, "reachability").unwrap_or("?");
-            let _ = writeln!(out, "    {}{{{{\"⛔ {id}<br/><i>{reach}</i>\"}}}}", pmid(slug, id));
-        }
-        for kt in slot_blocks(slice, "kill_test") {
-            let id = block_name_or(kt, "?");
-            let kind = field_ident_str(kt, "kind").unwrap_or("?");
-            let status = field_ident_str(kt, "status").unwrap_or("declared");
-            let _ = writeln!(out, "    {}[/\"🎯 {id}<br/>{kind} · {status}\"/]", pmid(slug, id));
-        }
-        for pf in slot_blocks(slice, "post_failure") {
-            let id = block_name_or(pf, "?");
-            let _ = writeln!(out, "    {}[\"📜 {id}<br/>(post_failure)\"]", pmid(slug, id));
-        }
-        let _ = writeln!(out, "  end");
-    }
+    render_aggregate_nodes(ws, &mut out);
 
     let _ = writeln!(out);
 
     // Edges, both intra- and cross-slice.
     for lf in &ws.files {
-        let Some(slice) = &lf.file.slice else { continue };
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
         let slug = slice.name.name.as_str();
 
         for d in slot_blocks(slice, "derived") {
@@ -591,40 +583,116 @@ pub fn render_mermaid_aggregate(ws: &WorkingSet) -> String {
             let id = block_name_or(fs, "?");
             if let Some(FieldValue::Map { entries, .. }) = field_value(fs, "cells") {
                 for MapEntry { key, .. } in entries {
-                    let _ = writeln!(out, "  {} -.touches.-> {}", pmid(slug, id), pmid(slug, &key.name));
+                    let _ = writeln!(
+                        out,
+                        "  {} -.touches.-> {}",
+                        pmid(slug, id),
+                        pmid(slug, &key.name)
+                    );
                 }
             }
-            if let Some(FieldValue::Ident(kt_ref)) = field_value(fs, "kill_test") {
-                if kt_ref.name != "TODO" {
-                    let _ = writeln!(out, "  {} ==kill==> {}", pmid(slug, &kt_ref.name), pmid(slug, id));
-                }
+            if let Some(FieldValue::Ident(kt_ref)) = field_value(fs, "kill_test")
+                && kt_ref.name != "TODO"
+            {
+                let _ = writeln!(
+                    out,
+                    "  {} ==kill==> {}",
+                    pmid(slug, &kt_ref.name),
+                    pmid(slug, id)
+                );
             }
         }
         for pf in slot_blocks(slice, "post_failure") {
             let id = block_name_or(pf, "?");
             if let Some(ev) = field_ident_str(pf, "event") {
-                let _ = writeln!(out, "  {} -.documents.-> {}", pmid(slug, id), pmid(slug, ev));
+                let _ = writeln!(
+                    out,
+                    "  {} -.documents.-> {}",
+                    pmid(slug, id),
+                    pmid(slug, ev)
+                );
             }
         }
 
         // Import edges between slice subgraph "anchors" — visualise the
         // dependency graph at the slice-level too.
         for import in &slice.imports {
-            if let Some(target_path) = lf.imports_resolved.get(import.alias.name.as_str()) {
-                if let Some(target_slug) = path_to_slug.get(target_path.as_path()) {
-                    let _ = writeln!(
-                        out,
-                        "  {}_box -.imports as {}.-> {}_box",
-                        mid(slug),
-                        import.alias.name,
-                        mid(target_slug),
-                    );
-                }
+            if let Some(target_path) = lf.imports_resolved.get(import.alias.name.as_str())
+                && let Some(target_slug) = path_to_slug.get(target_path.as_path())
+            {
+                let _ = writeln!(
+                    out,
+                    "  {}_box -.imports as {}.-> {}_box",
+                    mid(slug),
+                    import.alias.name,
+                    mid(target_slug),
+                );
             }
         }
     }
 
     out
+}
+
+fn render_aggregate_nodes(ws: &WorkingSet, out: &mut String) {
+    // Per-slice subgraph: nodes only.
+    for lf in &ws.files {
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
+        let slug = slice.name.name.as_str();
+        let _ = writeln!(out, "  subgraph {}_box [\"slice {}\"]", mid(slug), slug);
+        for c in slot_blocks(slice, "cell") {
+            let id = block_name_or(c, "?");
+            let ty = field_value(c, "type").map(value_inline).unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "    {}[(\"{id}<br/><i>{}</i>\")]",
+                pmid(slug, id),
+                mermaid_escape(&ty)
+            );
+        }
+        for d in slot_blocks(slice, "derived") {
+            let id = block_name_or(d, "?");
+            let _ = writeln!(out, "    {}{{{{\"{id}<br/>(derived)\"}}}}", pmid(slug, id));
+        }
+        for a in slot_blocks(slice, "association") {
+            let id = block_name_or(a, "?");
+            let _ = writeln!(out, "    {}[/\"{id}<br/>(invariant)\"\\]", pmid(slug, id));
+        }
+        for e in slot_blocks(slice, "event") {
+            let id = block_name_or(e, "?");
+            let _ = writeln!(out, "    {}([\"{id}<br/>(event)\"])", pmid(slug, id));
+        }
+        for fs in slot_blocks(slice, "forbidden_state") {
+            let id = block_name_or(fs, "?");
+            let reach = field_ident_str(fs, "reachability").unwrap_or("?");
+            let _ = writeln!(
+                out,
+                "    {}{{{{\"⛔ {id}<br/><i>{reach}</i>\"}}}}",
+                pmid(slug, id)
+            );
+        }
+        for kt in slot_blocks(slice, "kill_test") {
+            let id = block_name_or(kt, "?");
+            let kind = field_ident_str(kt, "kind").unwrap_or("?");
+            let status = field_ident_str(kt, "status").unwrap_or("declared");
+            let _ = writeln!(
+                out,
+                "    {}[/\"🎯 {id}<br/>{kind} · {status}\"/]",
+                pmid(slug, id)
+            );
+        }
+        for pf in slot_blocks(slice, "post_failure") {
+            let id = block_name_or(pf, "?");
+            let _ = writeln!(
+                out,
+                "    {}[\"📜 {id}<br/>(post_failure)\"]",
+                pmid(slug, id)
+            );
+        }
+        let _ = writeln!(out, "  end");
+    }
 }
 
 /// For each ident or qualified ident appearing in a field value, call `emit`
@@ -642,10 +710,10 @@ fn edges_from_value(
     match value {
         FieldValue::Ident(i) => emit(pmid(local_slug, &i.name)),
         FieldValue::QualifiedIdent { alias, name, .. } => {
-            if let Some(target_path) = imports_resolved.get(alias.name.as_str()) {
-                if let Some(target_slug) = path_to_slug.get(target_path.as_path()) {
-                    emit(pmid(target_slug, &name.name));
-                }
+            if let Some(target_path) = imports_resolved.get(alias.name.as_str())
+                && let Some(target_slug) = path_to_slug.get(target_path.as_path())
+            {
+                emit(pmid(target_slug, &name.name));
             }
         }
         FieldValue::List { items, .. } => {
@@ -661,7 +729,9 @@ fn mermaid_escape(s: &str) -> String {
     // Inside Mermaid quoted node labels: `<` and `>` need escaping (HTML),
     // `"` needs escaping (closes the label). `|` is fine inside quoted
     // labels — only special in arrow contexts.
-    s.replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 // ---------------------------------------------------------------------------
@@ -701,7 +771,10 @@ fn field_value<'a>(block: &'a BlockDecl, key: &str) -> Option<&'a FieldValue> {
 }
 
 fn field_is_true(block: &BlockDecl, key: &str) -> bool {
-    matches!(field_value(block, key), Some(FieldValue::Bool { value: true, .. }))
+    matches!(
+        field_value(block, key),
+        Some(FieldValue::Bool { value: true, .. })
+    )
 }
 
 fn field_ident_str<'a>(block: &'a BlockDecl, key: &str) -> Option<&'a str> {
@@ -735,21 +808,21 @@ fn list_field_inline(block: &BlockDecl, key: &str) -> String {
 fn list_idents_inline(items: &[FieldValue]) -> String {
     let parts: Vec<String> = items
         .iter()
-        .filter_map(|v| match v {
-            FieldValue::Ident(i) => Some(format!("`{}`", i.name)),
-            other => Some(format!("`{}`", value_inline(other))),
+        .map(|v| match v {
+            FieldValue::Ident(i) => format!("`{}`", i.name),
+            other => format!("`{}`", value_inline(other)),
         })
         .collect();
     parts.join(", ")
 }
 
-/// Render a FieldValue in compact inline form for embedding in prose.
+/// Render a `FieldValue` in compact inline form for embedding in prose.
 fn value_inline(value: &FieldValue) -> String {
     match value {
         FieldValue::Ident(i) => i.name.clone(),
         FieldValue::Bool { value, .. } => value.to_string(),
         FieldValue::Int { value, .. } => value.to_string(),
-        FieldValue::String { value, .. } => format!("\"{}\"", value),
+        FieldValue::String { value, .. } => format!("\"{value}\""),
         FieldValue::List { items, .. } => {
             let parts: Vec<String> = items.iter().map(value_inline).collect();
             format!("[{}]", parts.join(", "))
@@ -761,7 +834,12 @@ fn value_inline(value: &FieldValue) -> String {
                 .collect();
             format!("{{{}}}", parts.join(", "))
         }
-        FieldValue::TypeApp { head, params, alternation, .. } => {
+        FieldValue::TypeApp {
+            head,
+            params,
+            alternation,
+            ..
+        } => {
             let sep = if *alternation { " | " } else { ", " };
             let inner: Vec<String> = params.iter().map(value_inline).collect();
             format!("{}<{}>", head.name, inner.join(sep))

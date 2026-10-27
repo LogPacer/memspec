@@ -3,7 +3,10 @@
 
 use std::path::Path;
 
-use memspec_parser::analysis::{analyze_working_set, loader::{FsLoader, load_with_imports}};
+use memspec_parser::analysis::{
+    analyze_working_set,
+    loader::{FsLoader, load_with_imports},
+};
 use memspec_parser::diagnostic::Severity;
 
 #[test]
@@ -71,11 +74,10 @@ fn missing_qualified_id_emits_diagnostic_via_fs_loader() {
     let ws = load_with_imports(&loader, &audit_path);
     let analysis = analyze_working_set(&ws);
 
-    let any_unresolved = analysis
-        .by_file
-        .values()
-        .flatten()
-        .any(|d| d.code == memspec_parser::diagnostic::codes::E_LOADER_QUALIFIED_REF_UNRESOLVED);
+    let any_unresolved =
+        analysis.by_file.values().flatten().any(|d| {
+            d.code == memspec_parser::diagnostic::codes::E_LOADER_QUALIFIED_REF_UNRESOLVED
+        });
     assert!(any_unresolved, "expected E0403 unresolved qualified ref");
 
     let _ = fs::remove_dir_all(&tmpdir);

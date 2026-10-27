@@ -43,7 +43,11 @@ fn markdown_file_gets_friendly_e0006_not_diagnostic_flood() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     // Exit code: 2 (parse-class — file isn't lexable as a .memspec).
-    assert_eq!(out.status.code(), Some(2), "expected exit 2 for non-.memspec file");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected exit 2 for non-.memspec file"
+    );
 
     // Should have exactly ONE diagnostic of code memspec/E0006.
     assert!(
@@ -61,7 +65,10 @@ fn markdown_file_gets_friendly_e0006_not_diagnostic_flood() {
 
 #[test]
 fn real_memspec_with_bad_content_still_reports_honestly() {
-    let dir = std::env::temp_dir().join(format!("memspec_wrong_file_type_test_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "memspec_wrong_file_type_test_{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("typo.memspec");
     std::fs::write(
@@ -81,7 +88,11 @@ fn real_memspec_with_bad_content_still_reports_honestly() {
 
     // Exit 3 — semantic error (unresolved cell ref). The heuristic must
     // NOT trigger here (real .memspec, just bad content).
-    assert_eq!(out.status.code(), Some(3), "expected exit 3 for unresolved cell");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "expected exit 3 for unresolved cell"
+    );
     assert!(
         stdout.contains("memspec/E0252"),
         "expected E0252 unresolved-cell-ref; got:\n{stdout}"

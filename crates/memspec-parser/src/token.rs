@@ -11,28 +11,31 @@ use crate::span::Span;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     // Punctuation
-    LBrace,    // {
-    RBrace,    // }
-    LBracket,  // [
-    RBracket,  // ]
-    LParen,    // (
-    RParen,    // )
-    LAngle,    // <
-    RAngle,    // >
-    Comma,     // ,
-    Colon,     // :
-    Semi,      // ;
-    Dot,       // .
-    Pipe,      // |
-    Eq,        // =
-    Arrow,     // ->
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+    LParen,   // (
+    RParen,   // )
+    LAngle,   // <
+    RAngle,   // >
+    Comma,    // ,
+    Colon,    // :
+    Semi,     // ;
+    Dot,      // .
+    Pipe,     // |
+    Eq,       // =
+    Arrow,    // ->
 
     // Literals
     Identifier(String),
     IntLit(i64),
     /// String literal, content with escapes already resolved.
     /// `is_triple` distinguishes `"..."` from `"""..."""`.
-    StringLit { value: String, is_triple: bool },
+    StringLit {
+        value: String,
+        is_triple: bool,
+    },
 
     /// End of input. One emitted per token stream.
     Eof,

@@ -1,0 +1,29 @@
+name: Rust CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.configuration }})
+    strategy:
+      matrix:
+        include:
+          - configuration: default
+            feature_args: ""
+          - configuration: experimental-revisions
+            feature_args: "--features experimental-revisions"
+    uses: LogPacer/.github/.github/workflows/ci-rust.yml@main
+    with:
+      toolchain: stable
+      clippy_args: --workspace --all-targets --locked ${{ matrix.feature_args }} -- -D warnings
+      test_args: --workspace --locked ${{ matrix.feature_args }}

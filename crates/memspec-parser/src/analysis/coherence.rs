@@ -17,8 +17,8 @@
 //! Warnings:
 //! - Cell declared but never referenced.
 //! - Event with empty `mutates:` list.
-//! - Behavioural kill_test for a `reachability: structurally_unreachable`
-//!   forbidden_state (suggests `kind: type_shape` instead).
+//! - Behavioural `kill_test` for a `reachability: structurally_unreachable`
+//!   `forbidden_state` (suggests `kind: type_shape` instead).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -91,11 +91,11 @@ struct SymbolTable<'a> {
 #[derive(Debug)]
 struct EventEntry<'a> {
     decl: Decl<'a>,
-    /// step-id → step BlockDecl
+    /// step-id → step `BlockDecl`
     steps: BTreeMap<&'a str, &'a BlockDecl>,
 }
 
-impl<'a> SymbolTable<'a> {
+impl SymbolTable<'_> {
     fn cell_or_derived(&self, id: &str) -> Option<IdKind> {
         if self.cells.contains_key(id) {
             Some(IdKind::Cell)
@@ -114,7 +114,9 @@ fn build_symbol_table<'a>(
     let mut symbols = SymbolTable::default();
 
     for item in &slice.items {
-        let BlockItem::Block(block) = item else { continue };
+        let BlockItem::Block(block) = item else {
+            continue;
+        };
         let kind = match block.kind.name.as_str() {
             "cell" => IdKind::Cell,
             "derived" => IdKind::Derived,
@@ -150,7 +152,12 @@ fn build_symbol_table<'a>(
         }
         symbols.by_name.entry(id).or_default().push((kind, span));
 
-        let decl = Decl { id, span, kind, block };
+        let decl = Decl {
+            id,
+            span,
+            kind,
+            block,
+        };
         match kind {
             IdKind::Cell => {
                 symbols.cells.insert(id, decl);
@@ -164,25 +171,24 @@ fn build_symbol_table<'a>(
             IdKind::Event => {
                 let mut steps = BTreeMap::new();
                 for inner in &block.items {
-                    if let BlockItem::Block(step_block) = inner {
-                        if step_block.kind.name == "step" {
-                            if let Some(step_name) = block_name_ident(step_block) {
-                                if steps.contains_key(step_name.name.as_str()) {
-                                    out.push(
-                                        Diagnostic::error(
-                                            codes::E_COH_DUPLICATE_STEP_ID,
-                                            step_name.span,
-                                            format!(
-                                                "step `{}` is declared twice in event `{id}`",
-                                                step_name.name
-                                            ),
-                                        )
-                                        .with_hint("step IDs must be unique within their event"),
-                                    );
-                                } else {
-                                    steps.insert(step_name.name.as_str(), step_block);
-                                }
-                            }
+                    if let BlockItem::Block(step_block) = inner
+                        && step_block.kind.name == "step"
+                        && let Some(step_name) = block_name_ident(step_block)
+                    {
+                        if steps.contains_key(step_name.name.as_str()) {
+                            out.push(
+                                Diagnostic::error(
+                                    codes::E_COH_DUPLICATE_STEP_ID,
+                                    step_name.span,
+                                    format!(
+                                        "step `{}` is declared twice in event `{id}`",
+                                        step_name.name
+                                    ),
+                                )
+                                .with_hint("step IDs must be unique within their event"),
+                            );
+                        } else {
+                            steps.insert(step_name.name.as_str(), step_block);
                         }
                     }
                 }
@@ -272,10 +278,18 @@ fn check_refs(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
         }
     }
 
+    check_post_failure_refs(symbols, out);
+}
+
+fn check_post_failure_refs(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
     // post_failure.cells_after / pre_rollback / post_rollback (anonymous blocks
     // OR field map). Each key must resolve to a declared cell.
     for pf in symbols.post_failures.values() {
-        for variant in ["cells_after", "cells_after_pre_rollback", "cells_after_rollback"] {
+        for variant in [
+            "cells_after",
+            "cells_after_pre_rollback",
+            "cells_after_rollback",
+        ] {
             if let Some(value) = field_value(pf.block, variant) {
                 for (id, span) in collect_map_keys(value) {
                     if !symbols.cells.contains_key(id) {
@@ -361,15 +375,19 @@ fn check_bipartite(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
                     Diagnostic::error(
                         codes::E_COH_UNRESOLVED_KILL_TEST_REF,
                         kt_ref.span,
-                        format!("forbidden_state `{}` references unknown kill_test `{kt_name}`", fs.id),
+                        format!(
+                            "forbidden_state `{}` references unknown kill_test `{kt_name}`",
+                            fs.id
+                        ),
                     )
                     .with_hint("declare it as `kill_test <id> { ... }` or use `kill_test: TODO`"),
                 ),
                 Some(kt) => {
                     // bipartite back-ref check
-                    if let Some(FieldValue::Ident(back)) = field_value(kt.block, "forbidden") {
-                        if back.name != fs.id {
-                            out.push(Diagnostic::error(
+                    if let Some(FieldValue::Ident(back)) = field_value(kt.block, "forbidden")
+                        && back.name != fs.id
+                    {
+                        out.push(Diagnostic::error(
                                 codes::E_COH_BIPARTITE_MISMATCH,
                                 back.span,
                                 format!(
@@ -377,7 +395,6 @@ fn check_bipartite(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
                                     kt_name, back.name, fs.id
                                 ),
                             ));
-                        }
                     }
                 }
             }
@@ -393,7 +410,10 @@ fn check_bipartite(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
                     Diagnostic::error(
                         codes::E_COH_UNRESOLVED_FORBIDDEN_REF,
                         fs_ref.span,
-                        format!("kill_test `{}` references unknown forbidden_state `{fs_name}`", kt.id),
+                        format!(
+                            "kill_test `{}` references unknown forbidden_state `{fs_name}`",
+                            kt.id
+                        ),
                     )
                     .with_hint("declare it as `forbidden_state <id> { ... }`"),
                 );
@@ -426,7 +446,7 @@ fn check_derivation_cycles(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>)
             let mut stack = vec![(id, 0usize)];
             color.insert(id, 1);
             while let Some(&mut (node, ref mut idx)) = stack.last_mut() {
-                let neighbors = adj.get(node).map(Vec::as_slice).unwrap_or(&[]);
+                let neighbors = adj.get(node).map_or(&[][..], Vec::as_slice);
                 if *idx < neighbors.len() {
                     let next = neighbors[*idx];
                     *idx += 1;
@@ -441,11 +461,7 @@ fn check_derivation_cycles(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>)
                         }
                         1 => {
                             // Back edge → cycle.
-                            let span = symbols
-                                .derived
-                                .get(next)
-                                .map(|d| d.span)
-                                .unwrap_or(Span::DUMMY);
+                            let span = symbols.derived.get(next).map_or(Span::DUMMY, |d| d.span);
                             out.push(Diagnostic::error(
                                 codes::E_COH_DERIVATION_CYCLE,
                                 span,
@@ -469,11 +485,7 @@ fn check_derivation_cycles(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>)
 // Warnings
 // ---------------------------------------------------------------------------
 
-fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
-    // Build set of cell-ids actually referenced anywhere. The IDs borrow
-    // from the AST through the symbol table; lifetime 'a flows naturally.
-    let mut referenced: HashSet<&'a str> = HashSet::new();
-
+fn referenced_cells<'a>(symbols: &SymbolTable<'a>) -> HashSet<&'a str> {
     fn add_idents<'a>(value: &'a FieldValue, out: &mut HashSet<&'a str>) {
         match value {
             FieldValue::Ident(i) => {
@@ -503,7 +515,11 @@ fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
         }
     }
 
-    fn add_anon_block_field_names<'a>(block: &'a BlockDecl, kind: &str, out: &mut HashSet<&'a str>) {
+    fn add_anon_block_field_names<'a>(
+        block: &'a BlockDecl,
+        kind: &str,
+        out: &mut HashSet<&'a str>,
+    ) {
         if let Some(b) = nested_block(block, kind) {
             for item in &b.items {
                 if let BlockItem::Field(f) = item {
@@ -512,6 +528,10 @@ fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
             }
         }
     }
+
+    // Build set of cell-ids actually referenced anywhere. The IDs borrow
+    // from the AST through the symbol table; lifetime 'a flows naturally.
+    let mut referenced: HashSet<&'a str> = HashSet::new();
 
     for d in symbols.derived.values() {
         add_field(d.block, "derives_from", &mut referenced);
@@ -530,11 +550,21 @@ fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
         add_anon_block_field_names(fs.block, "cells", &mut referenced);
     }
     for pf in symbols.post_failures.values() {
-        for variant in ["cells_after", "cells_after_pre_rollback", "cells_after_rollback"] {
+        for variant in [
+            "cells_after",
+            "cells_after_pre_rollback",
+            "cells_after_rollback",
+        ] {
             add_field(pf.block, variant, &mut referenced);
             add_anon_block_field_names(pf.block, variant, &mut referenced);
         }
     }
+
+    referenced
+}
+
+fn check_warnings(symbols: &SymbolTable<'_>, out: &mut Vec<Diagnostic>) {
+    let referenced = referenced_cells(symbols);
 
     for cell in symbols.cells.values() {
         if !referenced.contains(cell.id) {
@@ -544,39 +574,45 @@ fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
                     cell.span,
                     format!("cell `{}` is declared but never referenced", cell.id),
                 )
-                .with_hint("either reference it from a derived/event/forbidden_state, or remove it"),
+                .with_hint(
+                    "either reference it from a derived/event/forbidden_state, or remove it",
+                ),
             );
         }
     }
 
     // Event with empty mutates list.
     for e in symbols.events.values() {
-        if let Some(FieldValue::List { items, .. }) = field_value(e.decl.block, "mutates") {
-            if items.is_empty() {
-                out.push(Diagnostic::warning(
-                    codes::W_COH_EVENT_EMPTY_MUTATES,
-                    e.decl.span,
-                    format!("event `{}` declares an empty `mutates: []` list", e.decl.id),
-                ));
-            }
+        if let Some(FieldValue::List { items, .. }) = field_value(e.decl.block, "mutates")
+            && items.is_empty()
+        {
+            out.push(Diagnostic::warning(
+                codes::W_COH_EVENT_EMPTY_MUTATES,
+                e.decl.span,
+                format!("event `{}` declares an empty `mutates: []` list", e.decl.id),
+            ));
         }
     }
 
     // Behavioural kill_test for structurally_unreachable forbidden state.
     for fs in symbols.forbidden_states.values() {
-        let reachability = field_value(fs.block, "reachability")
-            .and_then(|v| match v {
-                FieldValue::Ident(i) => Some(i.name.as_str()),
-                _ => None,
-            });
+        let reachability = field_value(fs.block, "reachability").and_then(|v| match v {
+            FieldValue::Ident(i) => Some(i.name.as_str()),
+            _ => None,
+        });
         if reachability != Some("structurally_unreachable") {
             continue;
         }
-        let Some(FieldValue::Ident(kt_ref)) = field_value(fs.block, "kill_test") else { continue };
-        let Some(kt) = symbols.kill_tests.get(kt_ref.name.as_str()) else { continue };
-        if let Some(FieldValue::Ident(kind)) = field_value(kt.block, "kind") {
-            if kind.name == "behavioural" {
-                out.push(
+        let Some(FieldValue::Ident(kt_ref)) = field_value(fs.block, "kill_test") else {
+            continue;
+        };
+        let Some(kt) = symbols.kill_tests.get(kt_ref.name.as_str()) else {
+            continue;
+        };
+        if let Some(FieldValue::Ident(kind)) = field_value(kt.block, "kind")
+            && kind.name == "behavioural"
+        {
+            out.push(
                     Diagnostic::warning(
                         codes::W_COH_REDUNDANT_KILL_TEST,
                         kind.span,
@@ -587,7 +623,6 @@ fn check_warnings<'a>(symbols: &SymbolTable<'a>, out: &mut Vec<Diagnostic>) {
                     )
                     .with_hint("type-shape kill-tests assert the structural property that makes the state unreachable"),
                 );
-            }
         }
     }
 }
@@ -619,7 +654,10 @@ fn nested_block<'a>(block: &'a BlockDecl, kind: &str) -> Option<&'a BlockDecl> {
 }
 
 fn field_is_true(block: &BlockDecl, key: &str) -> bool {
-    matches!(field_value(block, key), Some(FieldValue::Bool { value: true, .. }))
+    matches!(
+        field_value(block, key),
+        Some(FieldValue::Bool { value: true, .. })
+    )
 }
 
 /// Collect identifiers from a field value. Lists are flattened; non-ident
@@ -664,7 +702,9 @@ mod tests {
 
     #[test]
     fn duplicate_id_across_kinds_emits_diagnostic() {
-        let d = analyze_str("slice s { cell foo { type: boolean mutable: true } event foo { mutates: [foo] step s { op: \"x\" fallible: true } } }");
+        let d = analyze_str(
+            "slice s { cell foo { type: boolean mutable: true } event foo { mutates: [foo] step s { op: \"x\" fallible: true } } }",
+        );
         assert!(
             d.iter().any(|d| d.code == codes::E_COH_DUPLICATE_ID),
             "expected duplicate-id diagnostic, got: {d:#?}"
@@ -682,8 +722,14 @@ mod tests {
                 }
             }"#,
         );
-        let unresolved: Vec<_> = d.iter().filter(|d| d.code == codes::E_COH_UNRESOLVED_CELL_REF).collect();
-        assert!(unresolved.len() >= 2, "expected ≥2 unresolved-cell diagnostics (event + step)");
+        let unresolved: Vec<_> = d
+            .iter()
+            .filter(|d| d.code == codes::E_COH_UNRESOLVED_CELL_REF)
+            .collect();
+        assert!(
+            unresolved.len() >= 2,
+            "expected ≥2 unresolved-cell diagnostics (event + step)"
+        );
     }
 
     #[test]
@@ -720,7 +766,10 @@ mod tests {
             }"#,
         );
         let errors: Vec<_> = d.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "expected clean coherence pass, got: {errors:#?}");
+        assert!(
+            errors.is_empty(),
+            "expected clean coherence pass, got: {errors:#?}"
+        );
     }
 
     #[test]
@@ -762,7 +811,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(d.iter().any(|d| d.code == codes::E_COH_UNRESOLVED_FORBIDDEN_REF));
+        assert!(
+            d.iter()
+                .any(|d| d.code == codes::E_COH_UNRESOLVED_FORBIDDEN_REF)
+        );
     }
 
     #[test]
@@ -777,7 +829,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(!d.iter().any(|d| d.code == codes::E_COH_UNRESOLVED_KILL_TEST_REF));
+        assert!(
+            !d.iter()
+                .any(|d| d.code == codes::E_COH_UNRESOLVED_KILL_TEST_REF)
+        );
     }
 
     #[test]
@@ -792,7 +847,10 @@ mod tests {
                 }
             }"#,
         );
-        let warnings: Vec<_> = d.iter().filter(|d| d.code == codes::W_COH_UNUSED_CELL).collect();
+        let warnings: Vec<_> = d
+            .iter()
+            .filter(|d| d.code == codes::W_COH_UNUSED_CELL)
+            .collect();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("unused"));
     }
@@ -852,7 +910,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(d.iter().any(|d| d.code == codes::E_COH_UNRESOLVED_EVENT_REF));
+        assert!(
+            d.iter()
+                .any(|d| d.code == codes::E_COH_UNRESOLVED_EVENT_REF)
+        );
     }
 
     #[test]
@@ -884,7 +945,10 @@ mod tests {
         assert!(pr.diagnostics.is_empty(), "fixture should parse cleanly");
         let mut diags = Vec::new();
         run(&pr.file, &mut diags);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert!(
             errors.is_empty(),
             "canonical fixture should pass coherence pass; got errors: {errors:#?}"

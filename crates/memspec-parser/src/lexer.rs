@@ -53,7 +53,8 @@ impl<'s> Lexer<'s> {
             self.scan_one();
         }
         let end = self.bytes.len();
-        self.tokens.push(Token::new(TokenKind::Eof, Span::new(end, end)));
+        self.tokens
+            .push(Token::new(TokenKind::Eof, Span::new(end, end)));
     }
 
     /// Skip whitespace and comments. Mutates `self.pos`.
@@ -124,7 +125,8 @@ impl<'s> Lexer<'s> {
             b'-' => {
                 if self.peek(1) == Some(b'>') {
                     self.pos += 2;
-                    self.tokens.push(Token::new(TokenKind::Arrow, Span::new(start, self.pos)));
+                    self.tokens
+                        .push(Token::new(TokenKind::Arrow, Span::new(start, self.pos)));
                 } else {
                     // Lone '-' isn't valid in v0; emit diagnostic and skip.
                     self.pos += 1;
@@ -158,7 +160,8 @@ impl<'s> Lexer<'s> {
     fn emit_punct(&mut self, kind: TokenKind) {
         let start = self.pos;
         self.pos += 1;
-        self.tokens.push(Token::new(kind, Span::new(start, self.pos)));
+        self.tokens
+            .push(Token::new(kind, Span::new(start, self.pos)));
     }
 
     fn scan_identifier(&mut self, start: usize) {
@@ -167,7 +170,8 @@ impl<'s> Lexer<'s> {
         }
         let span = Span::new(start, self.pos);
         let text = span.slice(self.source).to_owned();
-        self.tokens.push(Token::new(TokenKind::Identifier(text), span));
+        self.tokens
+            .push(Token::new(TokenKind::Identifier(text), span));
     }
 
     fn scan_int(&mut self, start: usize) {
@@ -190,8 +194,8 @@ impl<'s> Lexer<'s> {
 
     fn scan_string(&mut self, start: usize) {
         // Detect triple-quote: """..."""
-        let is_triple = self.bytes.get(start + 1) == Some(&b'"')
-            && self.bytes.get(start + 2) == Some(&b'"');
+        let is_triple =
+            self.bytes.get(start + 1) == Some(&b'"') && self.bytes.get(start + 2) == Some(&b'"');
         let opener_len = if is_triple { 3 } else { 1 };
         self.pos = start + opener_len;
 
@@ -295,11 +299,10 @@ const fn is_ident_cont(b: u8) -> bool {
 /// UTF-8 codepoint length from the leading byte.
 const fn utf8_codepoint_len(lead: u8) -> usize {
     match lead {
-        0x00..=0x7F => 1,
         0xC0..=0xDF => 2,
         0xE0..=0xEF => 3,
         0xF0..=0xF7 => 4,
-        _ => 1, // invalid lead byte; advance 1 to make progress
+        _ => 1, // ASCII or invalid lead byte; advance 1 to make progress
     }
 }
 
@@ -378,7 +381,10 @@ string""""#;
             .tokens
             .iter()
             .find_map(|t| match &t.kind {
-                TokenKind::StringLit { value, is_triple: true } => Some(value.clone()),
+                TokenKind::StringLit {
+                    value,
+                    is_triple: true,
+                } => Some(value.clone()),
                 _ => None,
             })
             .expect("expected triple-quoted string");
@@ -406,11 +412,19 @@ string""""#;
     fn unterminated_string_emits_diagnostic_but_continues() {
         let stream = tokenize("\"unclosed\nslice next");
         assert!(
-            stream.diagnostics.iter().any(|d| d.code == codes::E_LEX_UNTERMINATED_STRING),
+            stream
+                .diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_LEX_UNTERMINATED_STRING),
             "expected unterminated-string diagnostic"
         );
         // Recovery: subsequent identifier still tokenized.
-        assert!(stream.tokens.iter().any(|t| matches!(&t.kind, TokenKind::Identifier(s) if s == "next")));
+        assert!(
+            stream
+                .tokens
+                .iter()
+                .any(|t| matches!(&t.kind, TokenKind::Identifier(s) if s == "next"))
+        );
     }
 
     #[test]
@@ -442,7 +456,17 @@ string""""#;
             stream.diagnostics
         );
         // Sanity: at least one `slice` identifier and the EOF.
-        assert!(stream.tokens.iter().any(|t| matches!(&t.kind, TokenKind::Identifier(s) if s == "slice")));
-        assert!(stream.tokens.last().is_some_and(|t| matches!(t.kind, TokenKind::Eof)));
+        assert!(
+            stream
+                .tokens
+                .iter()
+                .any(|t| matches!(&t.kind, TokenKind::Identifier(s) if s == "slice"))
+        );
+        assert!(
+            stream
+                .tokens
+                .last()
+                .is_some_and(|t| matches!(t.kind, TokenKind::Eof))
+        );
     }
 }

@@ -22,7 +22,7 @@ jobs:
             feature_args: ""
           - configuration: experimental-revisions
             feature_args: "--features experimental-revisions"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

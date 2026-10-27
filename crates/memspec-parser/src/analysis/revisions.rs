@@ -6,6 +6,7 @@
 //! blocks and the source-to-source synthesis logic used by the CLI.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -549,7 +550,11 @@ pub fn canonical_source_projection(file: &File) -> String {
 pub fn source_sha256(source: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
+    let mut hash = String::from("sha256:");
+    for byte in hasher.finalize() {
+        write!(hash, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hash
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2259,6 +2264,18 @@ mod tests {
         assert_eq!(report.projection.forbidden_states, 1);
         assert_eq!(report.projection.kill_tests, 1);
         assert_eq!(report.revision.ops.len(), 18);
+    }
+
+    #[test]
+    fn source_hashes_match_standard_sha256_vectors() {
+        assert_eq!(
+            source_sha256(""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            source_sha256("abc"),
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

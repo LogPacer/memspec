@@ -531,7 +531,7 @@ fn draw_slices(f: &mut ratatui::Frame, state: &State, area: Rect) {
         .collect();
 
     let block = panel_block("[1] Slices", state.focused == Pane::Slices);
-    let mut list_state = state.slices_selection.clone();
+    let mut list_state = state.slices_selection;
     f.render_stateful_widget(
         List::new(items)
             .block(block)
@@ -553,7 +553,7 @@ fn draw_slots(f: &mut ratatui::Frame, state: &State, area: Rect) {
         .collect();
 
     let block = panel_block("[2] Slots", state.focused == Pane::Slots);
-    let mut list_state = state.slots_selection.clone();
+    let mut list_state = state.slots_selection;
     f.render_stateful_widget(
         List::new(items)
             .block(block)
@@ -592,7 +592,7 @@ fn draw_diagnostics(f: &mut ratatui::Frame, state: &State, area: Rect) {
         format!("[3] Diagnostics ({})", state.diag_rows.len()),
         state.focused == Pane::Diagnostics,
     );
-    let mut list_state = state.diagnostics_selection.clone();
+    let mut list_state = state.diagnostics_selection;
     f.render_stateful_widget(
         List::new(items)
             .block(block)

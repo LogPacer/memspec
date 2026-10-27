@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use schemars::{JsonSchema, schema_for};
+use schemars::{JsonSchema, generate::SchemaSettings};
 
 mod tui;
 #[cfg(feature = "experimental-revisions")]
@@ -203,7 +203,9 @@ fn main() -> ExitCode {
 
 fn schema_cmd() -> ExitCode {
     fn add<T: JsonSchema>(name: &str, defs: &mut serde_json::Map<String, serde_json::Value>) {
-        let s = schema_for!(T);
+        let s = SchemaSettings::draft07()
+            .into_generator()
+            .into_root_schema_for::<T>();
         if let Ok(v) = serde_json::to_value(&s) {
             defs.insert(name.to_owned(), v);
         }

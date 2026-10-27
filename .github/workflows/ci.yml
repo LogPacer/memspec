@@ -22,8 +22,22 @@ jobs:
             feature_args: ""
           - configuration: experimental-revisions
             feature_args: "--features experimental-revisions"
-    uses: LogPacer/.github/.github/workflows/ci-rust.yml@main
-    with:
-      toolchain: stable
-      clippy_args: --workspace --all-targets --locked ${{ matrix.feature_args }} -- -D warnings
-      test_args: --workspace --locked ${{ matrix.feature_args }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets --locked ${{ matrix.feature_args }} -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked ${{ matrix.feature_args }}

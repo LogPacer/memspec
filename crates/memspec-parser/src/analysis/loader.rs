@@ -29,8 +29,7 @@ pub trait Loader {
     fn canonicalize(&self, importing_from: &Path, target: &str) -> Result<PathBuf, LoadError> {
         let base = importing_from
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let joined = base.join(target);
         Ok(joined)
     }
@@ -71,8 +70,7 @@ impl Loader for FsLoader {
     fn canonicalize(&self, importing_from: &Path, target: &str) -> Result<PathBuf, LoadError> {
         let base = importing_from
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let joined = base.join(target);
         // Best-effort canonicalisation. If the file doesn't exist, return
         // the joined path so the caller can emit a NotFound diagnostic.
@@ -88,9 +86,12 @@ pub struct InMemoryLoader {
 
 impl InMemoryLoader {
     pub fn new() -> Self {
-        Self { files: BTreeMap::new() }
+        Self {
+            files: BTreeMap::new(),
+        }
     }
 
+    #[must_use]
     pub fn with_file(mut self, path: impl Into<PathBuf>, source: impl Into<String>) -> Self {
         self.files.insert(path.into(), source.into());
         self
@@ -114,8 +115,7 @@ impl Loader for InMemoryLoader {
     fn canonicalize(&self, importing_from: &Path, target: &str) -> Result<PathBuf, LoadError> {
         let base = importing_from
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         Ok(base.join(target))
     }
 }
@@ -172,13 +172,22 @@ pub fn load_with_imports(loader: &dyn Loader, root_path: &Path) -> WorkingSet {
                 imports_resolved: BTreeMap::new(),
             });
             visited.insert(root_path.to_path_buf());
-            walk_imports_of(loader, 0, &mut visited, &mut files, &mut vec![root_path.to_path_buf()]);
+            walk_imports_of(
+                loader,
+                0,
+                &mut visited,
+                &mut files,
+                &mut vec![root_path.to_path_buf()],
+            );
         }
         Err(e) => {
             files.push(LoadedFile {
                 path: root_path.to_path_buf(),
                 source: String::new(),
-                file: File { span: Span::new(0, 0), slice: None },
+                file: File {
+                    span: Span::new(0, 0),
+                    slice: None,
+                },
                 diagnostics: vec![Diagnostic::error(
                     codes::E_LOADER_NOT_FOUND,
                     Span::new(0, 0),
@@ -189,7 +198,10 @@ pub fn load_with_imports(loader: &dyn Loader, root_path: &Path) -> WorkingSet {
         }
     }
 
-    WorkingSet { root: root_path.to_path_buf(), files }
+    WorkingSet {
+        root: root_path.to_path_buf(),
+        files,
+    }
 }
 
 /// Walk imports declared in `files[importer_idx]`. For each import:
@@ -286,8 +298,10 @@ mod tests {
 
     #[test]
     fn in_memory_loader_loads_single_file() {
-        let loader = InMemoryLoader::new()
-            .with_file("/root/a.memspec", "slice a { cell x { type: boolean mutable: true } }");
+        let loader = InMemoryLoader::new().with_file(
+            "/root/a.memspec",
+            "slice a { cell x { type: boolean mutable: true } }",
+        );
         let ws = load_with_imports(&loader, Path::new("/root/a.memspec"));
         assert_eq!(ws.files.len(), 1);
         assert_eq!(ws.files[0].path, PathBuf::from("/root/a.memspec"));
@@ -327,7 +341,9 @@ mod tests {
         let ws = load_with_imports(&loader, Path::new("/root/main.memspec"));
         let main = ws.lookup(Path::new("/root/main.memspec")).unwrap();
         assert!(
-            main.diagnostics.iter().any(|d| d.code == codes::E_LOADER_NOT_FOUND),
+            main.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_LOADER_NOT_FOUND),
             "expected NOT_FOUND diagnostic"
         );
     }
@@ -335,14 +351,8 @@ mod tests {
     #[test]
     fn loader_detects_import_cycle() {
         let loader = InMemoryLoader::new()
-            .with_file(
-                "/root/a.memspec",
-                r#"slice a { use "./b.memspec" as b }"#,
-            )
-            .with_file(
-                "/root/b.memspec",
-                r#"slice b { use "./a.memspec" as a }"#,
-            );
+            .with_file("/root/a.memspec", r#"slice a { use "./b.memspec" as b }"#)
+            .with_file("/root/b.memspec", r#"slice b { use "./a.memspec" as a }"#);
         let ws = load_with_imports(&loader, Path::new("/root/a.memspec"));
         let cycle_diag = ws
             .files
@@ -360,14 +370,8 @@ mod tests {
                 "/root/a.memspec",
                 r#"slice a { use "./b.memspec" as b use "./c.memspec" as c }"#,
             )
-            .with_file(
-                "/root/b.memspec",
-                r#"slice b { use "./d.memspec" as d }"#,
-            )
-            .with_file(
-                "/root/c.memspec",
-                r#"slice c { use "./d.memspec" as d }"#,
-            )
+            .with_file("/root/b.memspec", r#"slice b { use "./d.memspec" as d }"#)
+            .with_file("/root/c.memspec", r#"slice c { use "./d.memspec" as d }"#)
             .with_file(
                 "/root/d.memspec",
                 "slice d { cell x { type: boolean mutable: true } }",

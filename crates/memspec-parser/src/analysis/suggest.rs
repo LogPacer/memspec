@@ -10,11 +10,11 @@
 //! 2. Missing required field on existing slot → suggest the field.
 //! 3. Forbidden state without predicate/cells body → suggest predicate.
 //! 4. Forbidden state's `kill_test:` ref doesn't resolve → suggest a
-//!    matching kill_test block.
-//! 5. Kill_test's `forbidden:` ref doesn't resolve → suggest a matching
-//!    forbidden_state block.
-//! 6. Event with ≥2 fallible steps missing a post_failure row → suggest
-//!    the post_failure block.
+//!    matching `kill_test` block.
+//! 5. `Kill_test`'s `forbidden:` ref doesn't resolve → suggest a matching
+//!    `forbidden_state` block.
+//! 6. Event with ≥2 fallible steps missing a `post_failure` row → suggest
+//!    the `post_failure` block.
 //! 7. Walk-clean.
 
 use serde::Serialize;
@@ -63,13 +63,13 @@ pub enum GapKind {
     EmptySlice,
     /// An existing block is missing a required field.
     MissingField,
-    /// A forbidden_state has no `predicate:` or `cells:` body.
+    /// A `forbidden_state` has no `predicate:` or `cells:` body.
     ForbiddenStateBody,
-    /// A kill_test ID is referenced but no matching block exists.
+    /// A `kill_test` ID is referenced but no matching block exists.
     MissingKillTest,
-    /// A forbidden_state ID is referenced by a kill_test but no matching block exists.
+    /// A `forbidden_state` ID is referenced by a `kill_test` but no matching block exists.
     MissingForbiddenState,
-    /// An event has fallible steps that need a post_failure row.
+    /// An event has fallible steps that need a `post_failure` row.
     MissingPostFailure,
 }
 
@@ -90,11 +90,17 @@ pub fn suggest(file: &File) -> SuggestReport {
 
     // Triage by priority.
     if let Some(gap) = next_gap(file, &diagnostics) {
-        SuggestReport { status: SuggestStatus::Gap, gap: Some(gap) }
+        SuggestReport {
+            status: SuggestStatus::Gap,
+            gap: Some(gap),
+        }
     } else if has_errors(&diagnostics) {
         // Errors of a kind we don't have a template for yet — fall back to
         // surfacing the first error without a template.
-        let d = diagnostics.iter().find(|d| d.severity == Severity::Error).unwrap();
+        let d = diagnostics
+            .iter()
+            .find(|d| d.severity == Severity::Error)
+            .unwrap();
         SuggestReport {
             status: SuggestStatus::Gap,
             gap: Some(Gap {
@@ -107,7 +113,10 @@ pub fn suggest(file: &File) -> SuggestReport {
             }),
         }
     } else {
-        SuggestReport { status: SuggestStatus::WalkComplete, gap: None }
+        SuggestReport {
+            status: SuggestStatus::WalkComplete,
+            gap: None,
+        }
     }
 }
 
@@ -115,7 +124,10 @@ pub fn suggest(file: &File) -> SuggestReport {
 pub fn suggest_from_source(source: &str) -> SuggestReport {
     let pr = crate::parser::parse(source);
     if pr.diagnostics.iter().any(|d| d.severity == Severity::Error) {
-        return SuggestReport { status: SuggestStatus::ParseErrors, gap: None };
+        return SuggestReport {
+            status: SuggestStatus::ParseErrors,
+            gap: None,
+        };
     }
     suggest(&pr.file)
 }
@@ -168,8 +180,10 @@ fn next_gap(file: &File, diagnostics: &[Diagnostic]) -> Option<Gap> {
 
     // Priority 4: kill_test reference doesn't resolve → suggest the kill_test block.
     if let Some(d) = diag_with_code(diagnostics, codes::E_COH_UNRESOLVED_KILL_TEST_REF) {
-        let kt_id = extract_quoted_after(&d.message, "unknown kill_test").unwrap_or_else(|| "<id>".to_owned());
-        let fs_id = extract_quoted_after(&d.message, "forbidden_state").unwrap_or_else(|| "<fs>".to_owned());
+        let kt_id = extract_quoted_after(&d.message, "unknown kill_test")
+            .unwrap_or_else(|| "<id>".to_owned());
+        let fs_id = extract_quoted_after(&d.message, "forbidden_state")
+            .unwrap_or_else(|| "<fs>".to_owned());
         return Some(Gap {
             kind: GapKind::MissingKillTest,
             message: d.message.clone(),
@@ -183,7 +197,8 @@ fn next_gap(file: &File, diagnostics: &[Diagnostic]) -> Option<Gap> {
 
     // Priority 5: forbidden_state reference doesn't resolve → suggest the FS block.
     if let Some(d) = diag_with_code(diagnostics, codes::E_COH_UNRESOLVED_FORBIDDEN_REF) {
-        let fs_id = extract_quoted_after(&d.message, "unknown forbidden_state").unwrap_or_else(|| "<id>".to_owned());
+        let fs_id = extract_quoted_after(&d.message, "unknown forbidden_state")
+            .unwrap_or_else(|| "<id>".to_owned());
         return Some(Gap {
             kind: GapKind::MissingForbiddenState,
             message: d.message.clone(),
@@ -318,41 +333,37 @@ fn parse_event_step(message: &str) -> Option<(String, String)> {
     let event_marker = "event: ";
     let step_marker = ", step: ";
     let ep = message.find(event_marker)?;
-    let after_ep = &message[ep + event_marker.len()..];
-    let sp = after_ep.find(step_marker)?;
-    let event = after_ep[..sp].to_owned();
-    let after_sp = &after_ep[sp + step_marker.len()..];
-    let end = after_sp.find('`').or_else(|| after_sp.find(' ')).unwrap_or(after_sp.len());
-    let step = after_sp[..end].to_owned();
+    let after_event = &message[ep + event_marker.len()..];
+    let sp = after_event.find(step_marker)?;
+    let event = after_event[..sp].to_owned();
+    let after_step = &after_event[sp + step_marker.len()..];
+    let end = after_step
+        .find('`')
+        .or_else(|| after_step.find(' '))
+        .unwrap_or(after_step.len());
+    let step = after_step[..end].to_owned();
     Some((event, step))
 }
 
 fn last_block_id(slice: &crate::ast::SliceDecl, kind: &str) -> Option<String> {
-    slice
-        .items
-        .iter()
-        .rev()
-        .find_map(|item| match item {
-            BlockItem::Block(b) if b.kind.name == kind => match &b.name {
-                Some(BlockName::Ident(i)) => Some(i.name.clone()),
-                _ => None,
-            },
+    slice.items.iter().rev().find_map(|item| match item {
+        BlockItem::Block(b) if b.kind.name == kind => match &b.name {
+            Some(BlockName::Ident(i)) => Some(i.name.clone()),
             _ => None,
-        })
+        },
+        _ => None,
+    })
 }
 
 fn event_atomicity(slice: &crate::ast::SliceDecl, event_id: &str) -> String {
     for item in &slice.items {
-        if let BlockItem::Block(b) = item {
-            if b.kind.name == "event" {
-                if let Some(BlockName::Ident(i)) = &b.name {
-                    if i.name == event_id {
-                        if let Some(FieldValue::Ident(a)) = field_value(b, "atomicity") {
-                            return a.name.clone();
-                        }
-                    }
-                }
-            }
+        if let BlockItem::Block(b) = item
+            && b.kind.name == "event"
+            && let Some(BlockName::Ident(i)) = &b.name
+            && i.name == event_id
+            && let Some(FieldValue::Ident(a)) = field_value(b, "atomicity")
+        {
+            return a.name.clone();
         }
     }
     "none".to_owned()
@@ -516,10 +527,6 @@ mod tests {
     #[test]
     fn parse_event_step_works() {
         let s = "missing post_failure for `event: e, step: s2`";
-        assert_eq!(
-            parse_event_step(s),
-            Some(("e".to_owned(), "s2".to_owned()))
-        );
+        assert_eq!(parse_event_step(s), Some(("e".to_owned(), "s2".to_owned())));
     }
 }
-

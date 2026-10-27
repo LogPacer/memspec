@@ -9,7 +9,7 @@
 //!    well-shaped enough to walk.
 //! 2. `coherence` — ID uniqueness, ref resolution, type-domain validity,
 //!    derivation cycles. (Pending.)
-//! 3. `symmetric_failure` — post_failure coverage for events with ≥2
+//! 3. `symmetric_failure` — `post_failure` coverage for events with ≥2
 //!    fallible steps. (Pending.)
 
 pub mod coherence;
@@ -46,7 +46,7 @@ pub struct AnalysisResult {
 /// 1. **structural** — required-field presence per slot.
 /// 2. **coherence** — symbol table, ref resolution, derivation acyclicity,
 ///    bipartite consistency, warnings.
-/// 3. **symmetric-failure** — post_failure coverage for events with ≥2
+/// 3. **symmetric-failure** — `post_failure` coverage for events with ≥2
 ///    fallible steps.
 pub fn analyze(file: &File) -> AnalysisResult {
     let mut diagnostics = Vec::new();

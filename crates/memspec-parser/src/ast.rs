@@ -98,14 +98,30 @@ pub struct Field {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FieldValue {
     Ident(Ident),
-    String { span: Span, value: String, is_triple: bool },
-    Int { span: Span, value: i64 },
-    Bool { span: Span, value: bool },
+    String {
+        span: Span,
+        value: String,
+        is_triple: bool,
+    },
+    Int {
+        span: Span,
+        value: i64,
+    },
+    Bool {
+        span: Span,
+        value: bool,
+    },
     /// `[a, b, c]` or multi-line list. Elements are themselves field values.
-    List { span: Span, items: Vec<FieldValue> },
+    List {
+        span: Span,
+        items: Vec<FieldValue>,
+    },
     /// `{ key: value, key: value }` — used for `cells:` / `cells_after:` /
     /// `impl_hints:` maps.
-    Map { span: Span, entries: Vec<MapEntry> },
+    Map {
+        span: Span,
+        entries: Vec<MapEntry>,
+    },
     /// Type-application like `enum<draft | published | archived>` or
     /// `set<RuleChangelog>`. The opening identifier is the type
     /// constructor; `params` are the comma-or-pipe separated arguments.

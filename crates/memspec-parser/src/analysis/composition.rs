@@ -44,7 +44,9 @@ pub fn run(ws: &WorkingSet) -> BTreeMap<PathBuf, Vec<Diagnostic>> {
 
     for lf in &ws.files {
         let mut diagnostics = Vec::new();
-        let Some(slice) = &lf.file.slice else { continue };
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
 
         // Collect every alias actually referenced in this slice.
         let used_aliases = collect_used_aliases(slice);
@@ -108,8 +110,12 @@ pub fn run(ws: &WorkingSet) -> BTreeMap<PathBuf, Vec<Diagnostic>> {
             }
             // Verify the name actually exists in the imported slice — otherwise
             // E0403 already covered it; no shadow warning needed.
-            let Some(target) = lf.imports_resolved.get(alias.as_str()) else { continue };
-            let Some(target_ids) = per_file_ids.get(target) else { continue };
+            let Some(target) = lf.imports_resolved.get(alias.as_str()) else {
+                continue;
+            };
+            let Some(target_ids) = per_file_ids.get(target) else {
+                continue;
+            };
             if !target_ids.all_ids.contains(name.as_str()) {
                 continue;
             }
@@ -146,10 +152,10 @@ struct FileIds {
 fn collect_top_level_ids(slice: &SliceDecl) -> FileIds {
     let mut ids = FileIds::default();
     for item in &slice.items {
-        if let BlockItem::Block(b) = item {
-            if let Some(BlockName::Ident(i)) = &b.name {
-                ids.all_ids.insert(i.name.clone());
-            }
+        if let BlockItem::Block(b) = item
+            && let Some(BlockName::Ident(i)) = &b.name
+        {
+            ids.all_ids.insert(i.name.clone());
         }
     }
     ids
@@ -277,7 +283,9 @@ mod tests {
                 "slice other { cell d { type: boolean mutable: true } }",
             );
         let diags = run_str(&loader, "/root/main.memspec");
-        let main = diags.get(Path::new("/root/main.memspec")).expect("main diags");
+        let main = diags
+            .get(Path::new("/root/main.memspec"))
+            .expect("main diags");
         assert!(main.iter().any(|d| d.code == codes::W_COMP_UNUSED_IMPORT));
     }
 
@@ -300,8 +308,15 @@ mod tests {
             );
         let diags = run_str(&loader, "/root/main.memspec");
         // No W0273 expected; might still get other compositions warnings on other files.
-        let main_diags = diags.get(Path::new("/root/main.memspec")).cloned().unwrap_or_default();
-        assert!(!main_diags.iter().any(|d| d.code == codes::W_COMP_UNUSED_IMPORT));
+        let main_diags = diags
+            .get(Path::new("/root/main.memspec"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !main_diags
+                .iter()
+                .any(|d| d.code == codes::W_COMP_UNUSED_IMPORT)
+        );
     }
 
     #[test]
@@ -323,8 +338,13 @@ mod tests {
                 "slice other { cell cell_a { type: boolean mutable: true } }",
             );
         let diags = run_str(&loader, "/root/main.memspec");
-        let main = diags.get(Path::new("/root/main.memspec")).expect("main diags");
-        assert!(main.iter().any(|d| d.code == codes::W_COMP_DUPLICATE_IMPORT_TARGET));
+        let main = diags
+            .get(Path::new("/root/main.memspec"))
+            .expect("main diags");
+        assert!(
+            main.iter()
+                .any(|d| d.code == codes::W_COMP_DUPLICATE_IMPORT_TARGET)
+        );
     }
 
     #[test]
@@ -346,8 +366,13 @@ mod tests {
                 "slice other { cell shared { type: enum<a | b> mutable: true } }",
             );
         let diags = run_str(&loader, "/root/main.memspec");
-        let main = diags.get(Path::new("/root/main.memspec")).expect("main diags");
-        assert!(main.iter().any(|d| d.code == codes::W_COMP_IMPORTED_ID_SHADOWED));
+        let main = diags
+            .get(Path::new("/root/main.memspec"))
+            .expect("main diags");
+        assert!(
+            main.iter()
+                .any(|d| d.code == codes::W_COMP_IMPORTED_ID_SHADOWED)
+        );
     }
 
     #[test]
@@ -369,7 +394,14 @@ mod tests {
                 "slice other { cell shared { type: boolean mutable: true } }",
             );
         let diags = run_str(&loader, "/root/main.memspec");
-        let main_diags = diags.get(Path::new("/root/main.memspec")).cloned().unwrap_or_default();
-        assert!(!main_diags.iter().any(|d| d.code == codes::W_COMP_IMPORTED_ID_SHADOWED));
+        let main_diags = diags
+            .get(Path::new("/root/main.memspec"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !main_diags
+                .iter()
+                .any(|d| d.code == codes::W_COMP_IMPORTED_ID_SHADOWED)
+        );
     }
 }

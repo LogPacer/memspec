@@ -3,7 +3,7 @@
 //! Walks each slot block and checks that the fields the v0 grammar
 //! marks REQUIRED are actually present. Does not validate field
 //! contents (those are coherence-pass concerns: type-domain validity,
-//! ref resolution, etc.). Does not check post_failure coverage —
+//! ref resolution, etc.). Does not check `post_failure` coverage —
 //! that's the symmetric-failure pass.
 //!
 //! Required-field table (per `docs/grammar-v0.md`):
@@ -15,11 +15,11 @@
 //! | `association`     | `invariant`, `over`, `enforced_by`                 |
 //! | `event`           | `mutates`, ≥1 `step` block                         |
 //! | `step` (in event) | `op`, `fallible`                                   |
-//! | `post_failure`    | `event`, `step`, `outcome`, cells_after\*           |
+//! | `post_failure`    | `event`, `step`, `outcome`, `cells_after`\*           |
 //! | `forbidden_state` | `description`, `predicate` OR `cells`, `reachability`, `kill_test` |
 //! | `kill_test`       | `forbidden`, `kind`, `assertion`                   |
 //!
-//! \*cells_after means either a `cells_after:` field, OR an anonymous
+//! \*`cells_after` means either a `cells_after:` field, OR an anonymous
 //!  block named `cells_after`, OR — when atomicity is transactional —
 //!  the pair `cells_after_pre_rollback` + `cells_after_rollback`.
 //!  Structural pass accepts ANY of these; the symmetric-failure pass
@@ -48,7 +48,9 @@ pub fn run(file: &File, out: &mut Vec<Diagnostic>) {
     }
 
     for item in &slice.items {
-        let BlockItem::Block(block) = item else { continue };
+        let BlockItem::Block(block) = item else {
+            continue;
+        };
         match block.kind.name.as_str() {
             "cell" => check_cell(block, out),
             "derived" => check_derived(block, out),
@@ -106,12 +108,12 @@ fn check_event(block: &BlockDecl, out: &mut Vec<Diagnostic>) {
     }
     // Each step needs op + fallible
     for item in &block.items {
-        if let BlockItem::Block(b) = item {
-            if b.kind.name == "step" {
-                require_named(b, out, "step");
-                require_field(b, "op", out);
-                require_field(b, "fallible", out);
-            }
+        if let BlockItem::Block(b) = item
+            && b.kind.name == "step"
+        {
+            require_named(b, out, "step");
+            require_field(b, "op", out);
+            require_field(b, "fallible", out);
         }
     }
 }
@@ -160,7 +162,9 @@ fn check_forbidden_state(block: &BlockDecl, out: &mut Vec<Diagnostic>) {
                     block_name_or(block, "<unnamed>"),
                 ),
             )
-            .with_hint("declare exactly one of `predicate: \"...\"` or `cells: { id: value, ... }`"),
+            .with_hint(
+                "declare exactly one of `predicate: \"...\"` or `cells: { id: value, ... }`",
+            ),
         );
     }
     require_field(block, "reachability", out);
@@ -219,14 +223,14 @@ fn require_field(block: &BlockDecl, key: &str, out: &mut Vec<Diagnostic>) {
 fn has_field(block: &BlockDecl, key: &str) -> bool {
     block.items.iter().any(|item| match item {
         BlockItem::Field(f) => f.key.name == key,
-        _ => false,
+        BlockItem::Block(_) => false,
     })
 }
 
 fn has_block(block: &BlockDecl, kind: &str) -> bool {
     block.items.iter().any(|item| match item {
         BlockItem::Block(b) => b.kind.name == kind,
-        _ => false,
+        BlockItem::Field(_) => false,
     })
 }
 
@@ -274,19 +278,26 @@ mod tests {
     #[test]
     fn cell_missing_type_and_mutable() {
         let d = analyze_str("slice s { cell c { } }");
-        let missing: Vec<_> = d.iter().filter(|d| d.code == codes::E_STRUCT_MISSING_FIELD).collect();
+        let missing: Vec<_> = d
+            .iter()
+            .filter(|d| d.code == codes::E_STRUCT_MISSING_FIELD)
+            .collect();
         // type + mutable both missing
-        assert_eq!(missing.len(), 2, "expected 2 missing-field diagnostics, got: {missing:#?}");
+        assert_eq!(
+            missing.len(),
+            2,
+            "expected 2 missing-field diagnostics, got: {missing:#?}"
+        );
     }
 
     #[test]
     fn event_with_no_steps_emits_diagnostic() {
         let d = analyze_str(
-            r#"slice s {
+            r"slice s {
                 event e {
                     mutates: [c]
                 }
-            }"#,
+            }",
         );
         assert!(d.iter().any(|d| d.code == codes::E_STRUCT_EVENT_NO_STEPS));
     }
@@ -302,7 +313,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(d.iter().any(|d| d.code == codes::E_STRUCT_FORBIDDEN_STATE_BODY));
+        assert!(
+            d.iter()
+                .any(|d| d.code == codes::E_STRUCT_FORBIDDEN_STATE_BODY)
+        );
     }
 
     #[test]
@@ -317,7 +331,10 @@ mod tests {
                 }
             }"#,
         );
-        assert!(!d.iter().any(|d| d.code == codes::E_STRUCT_FORBIDDEN_STATE_BODY));
+        assert!(
+            !d.iter()
+                .any(|d| d.code == codes::E_STRUCT_FORBIDDEN_STATE_BODY)
+        );
     }
 
     #[test]
@@ -376,8 +393,9 @@ mod tests {
             }"#,
         );
         assert!(
-            !d.iter().any(|d| d.code == codes::E_STRUCT_MISSING_FIELD
-                && d.message.contains("cells_after"))
+            !d.iter()
+                .any(|d| d.code == codes::E_STRUCT_MISSING_FIELD
+                    && d.message.contains("cells_after"))
         );
     }
 }

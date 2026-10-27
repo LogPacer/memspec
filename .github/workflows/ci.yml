@@ -1,0 +1,43 @@
+name: Rust CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.configuration }})
+    strategy:
+      matrix:
+        include:
+          - configuration: default
+            feature_args: ""
+          - configuration: experimental-revisions
+            feature_args: "--features experimental-revisions"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets --locked ${{ matrix.feature_args }} -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked ${{ matrix.feature_args }}

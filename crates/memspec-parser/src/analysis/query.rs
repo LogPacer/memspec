@@ -5,7 +5,7 @@
 //! - `by_id` — full declaration JSON for a given ID.
 //! - `refs_to` — every site that points at a given ID, with span + role.
 //! - `gaps` — structured gap analysis (unkilled forbidden states,
-//!   `kill_test: TODO`, missing post_failure rows, unused cells).
+//!   `kill_test: TODO`, missing `post_failure` rows, unused cells).
 //!
 //! All operate on AST alone — no source-code access, no test running.
 //! Outputs are `serde::Serialize`able report types ready for JSON.
@@ -42,7 +42,9 @@ pub struct EventListing {
 
 pub fn list_ids(file: &File) -> ListIdsReport {
     let mut report = ListIdsReport::default();
-    let Some(slice) = &file.slice else { return report };
+    let Some(slice) = &file.slice else {
+        return report;
+    };
     report.slice = Some(slice.name.name.clone());
 
     for item in &slice.items {
@@ -63,7 +65,10 @@ pub fn list_ids(file: &File) -> ListIdsReport {
                             _ => None,
                         })
                         .collect();
-                    report.events.push(EventListing { id: name.to_owned(), steps });
+                    report.events.push(EventListing {
+                        id: name.to_owned(),
+                        steps,
+                    });
                 }
             }
             "post_failure" => push_named(&mut report.post_failures, b),
@@ -108,33 +113,31 @@ pub struct ByIdReport<'a> {
 pub fn by_id<'a>(file: &'a File, id: &str) -> Option<ByIdReport<'a>> {
     let slice = file.slice.as_ref()?;
     for item in &slice.items {
-        if let BlockItem::Block(b) = item {
-            if let Some(name) = block_name_str(b) {
-                if name == id {
-                    return Some(ByIdReport {
-                        id: id.to_owned(),
-                        kind: b.kind.name.clone(),
-                        span: b.span,
-                        block: b,
-                    });
-                }
-                // Also walk into events to find scoped step ids.
-                if b.kind.name == "event" {
-                    for inner in &b.items {
-                        if let BlockItem::Block(step) = inner {
-                            if step.kind.name == "step" {
-                                if let Some(step_name) = block_name_str(step) {
-                                    if step_name == id {
-                                        return Some(ByIdReport {
-                                            id: format!("{name}.{step_name}"),
-                                            kind: "step".to_owned(),
-                                            span: step.span,
-                                            block: step,
-                                        });
-                                    }
-                                }
-                            }
-                        }
+        if let BlockItem::Block(b) = item
+            && let Some(name) = block_name_str(b)
+        {
+            if name == id {
+                return Some(ByIdReport {
+                    id: id.to_owned(),
+                    kind: b.kind.name.clone(),
+                    span: b.span,
+                    block: b,
+                });
+            }
+            // Also walk into events to find scoped step ids.
+            if b.kind.name == "event" {
+                for inner in &b.items {
+                    if let BlockItem::Block(step) = inner
+                        && step.kind.name == "step"
+                        && let Some(step_name) = block_name_str(step)
+                        && step_name == id
+                    {
+                        return Some(ByIdReport {
+                            id: format!("{name}.{step_name}"),
+                            kind: "step".to_owned(),
+                            span: step.span,
+                            block: step,
+                        });
                     }
                 }
             }
@@ -163,8 +166,13 @@ pub struct RefSite {
 }
 
 pub fn refs_to(file: &File, id: &str) -> RefsReport {
-    let mut report = RefsReport { id: id.to_owned(), references: Vec::new() };
-    let Some(slice) = &file.slice else { return report };
+    let mut report = RefsReport {
+        id: id.to_owned(),
+        references: Vec::new(),
+    };
+    let Some(slice) = &file.slice else {
+        return report;
+    };
 
     for item in &slice.items {
         let BlockItem::Block(b) = item else { continue };
@@ -181,7 +189,9 @@ fn scan_block_refs(block: &BlockDecl, owner_path: &str, target: &str, out: &mut 
             BlockItem::Field(f) => scan_value_refs(&f.value, owner_path, &f.key.name, target, out),
             BlockItem::Block(inner) => {
                 let inner_path = match &inner.name {
-                    Some(BlockName::Ident(i)) => format!("{owner_path}/{}/{}", inner.kind.name, i.name),
+                    Some(BlockName::Ident(i)) => {
+                        format!("{owner_path}/{}/{}", inner.kind.name, i.name)
+                    }
                     Some(BlockName::Int { value, .. }) => {
                         format!("{owner_path}/{}/{}", inner.kind.name, value)
                     }
@@ -283,7 +293,9 @@ pub struct UnusedCell {
 
 pub fn gaps(file: &File) -> GapsReport {
     let mut report = GapsReport::default();
-    let Some(slice) = &file.slice else { return report };
+    let Some(slice) = &file.slice else {
+        return report;
+    };
 
     let mut declared_kill_tests: BTreeMap<&str, &BlockDecl> = BTreeMap::new();
     let mut declared_cells: BTreeMap<&str, (Span, &BlockDecl)> = BTreeMap::new();
@@ -313,16 +325,53 @@ pub fn gaps(file: &File) -> GapsReport {
         }
     }
 
+    report.unkilled_forbidden_states = unkilled_forbidden_states(slice, &declared_kill_tests);
+
+    // kill_tests with non-passing status.
+    for (id, kt) in &declared_kill_tests {
+        let status = field_ident(kt, "status").map_or("declared", |i| i.name.as_str());
+        if status != "executed_passing" {
+            report.kill_tests_unresolved.push(UnresolvedKT {
+                id: (*id).to_owned(),
+                status: status.to_owned(),
+                span: kt.span,
+            });
+        }
+    }
+
+    report.missing_post_failure = missing_post_failures(slice, &declared_pf);
+
+    // Unused cells.
+    let referenced = collect_referenced_cells(slice);
+    for (cell_id, (span, _)) in &declared_cells {
+        if !referenced.contains(cell_id) {
+            report.unused_cells.push(UnusedCell {
+                id: (*cell_id).to_owned(),
+                span: *span,
+            });
+        }
+    }
+
+    report
+}
+
+fn unkilled_forbidden_states(
+    slice: &SliceDecl,
+    declared_kill_tests: &BTreeMap<&str, &BlockDecl>,
+) -> Vec<UnkilledFS> {
+    let mut out = Vec::new();
     // Unkilled forbidden states + kill_tests_unresolved.
     for item in &slice.items {
         let BlockItem::Block(b) = item else { continue };
         if b.kind.name != "forbidden_state" {
             continue;
         }
-        let Some(fs_id) = block_name_str(b) else { continue };
+        let Some(fs_id) = block_name_str(b) else {
+            continue;
+        };
         let kt_field = field_value(b, "kill_test");
         match kt_field {
-            None => report.unkilled_forbidden_states.push(UnkilledFS {
+            None => out.push(UnkilledFS {
                 id: fs_id.to_owned(),
                 kill_test_ref: None,
                 reason: "no kill_test field declared",
@@ -331,16 +380,16 @@ pub fn gaps(file: &File) -> GapsReport {
             Some(FieldValue::Ident(i)) => {
                 let name = i.name.as_str();
                 if name == "TODO" {
-                    report.unkilled_forbidden_states.push(UnkilledFS {
+                    out.push(UnkilledFS {
                         id: fs_id.to_owned(),
                         kill_test_ref: Some("TODO".to_owned()),
                         reason: "kill_test obligation marked TODO",
                         span: i.span,
                     });
                 } else if let Some(kt) = declared_kill_tests.get(name) {
-                    let status = field_ident(kt, "status").map(|i| i.name.as_str()).unwrap_or("declared");
+                    let status = field_ident(kt, "status").map_or("declared", |i| i.name.as_str());
                     if status != "executed_passing" {
-                        report.unkilled_forbidden_states.push(UnkilledFS {
+                        out.push(UnkilledFS {
                             id: fs_id.to_owned(),
                             kill_test_ref: Some(name.to_owned()),
                             reason: match status {
@@ -353,7 +402,7 @@ pub fn gaps(file: &File) -> GapsReport {
                     }
                 } else {
                     // Unresolved ref — coherence pass already errors; still surface in gaps.
-                    report.unkilled_forbidden_states.push(UnkilledFS {
+                    out.push(UnkilledFS {
                         id: fs_id.to_owned(),
                         kill_test_ref: Some(name.to_owned()),
                         reason: "kill_test reference does not resolve",
@@ -365,27 +414,25 @@ pub fn gaps(file: &File) -> GapsReport {
         }
     }
 
-    // kill_tests with non-passing status.
-    for (id, kt) in &declared_kill_tests {
-        let status = field_ident(kt, "status")
-            .map(|i| i.name.as_str())
-            .unwrap_or("declared");
-        if status != "executed_passing" {
-            report.kill_tests_unresolved.push(UnresolvedKT {
-                id: (*id).to_owned(),
-                status: status.to_owned(),
-                span: kt.span,
-            });
-        }
-    }
+    out
+}
 
+fn missing_post_failures(
+    slice: &SliceDecl,
+    declared_pf: &BTreeMap<(&str, &str), &BlockDecl>,
+) -> Vec<MissingPF> {
+    let mut out = Vec::new();
     // Missing post_failure rows (mirror the symmetric-failure pass).
     for item in &slice.items {
-        let BlockItem::Block(event) = item else { continue };
+        let BlockItem::Block(event) = item else {
+            continue;
+        };
         if event.kind.name != "event" {
             continue;
         }
-        let Some(event_name) = block_name_str(event) else { continue };
+        let Some(event_name) = block_name_str(event) else {
+            continue;
+        };
         let steps: Vec<(&Ident, &BlockDecl)> = event
             .items
             .iter()
@@ -417,7 +464,7 @@ pub fn gaps(file: &File) -> GapsReport {
                 continue;
             }
             if !declared_pf.contains_key(&(event_name, step_name.name.as_str())) {
-                report.missing_post_failure.push(MissingPF {
+                out.push(MissingPF {
                     event: event_name.to_owned(),
                     step: step_name.name.clone(),
                     span: step_name.span,
@@ -426,23 +473,10 @@ pub fn gaps(file: &File) -> GapsReport {
         }
     }
 
-    // Unused cells.
-    let referenced = collect_referenced_cells(slice);
-    for (cell_id, (span, _)) in &declared_cells {
-        if !referenced.contains(cell_id) {
-            report.unused_cells.push(UnusedCell {
-                id: (*cell_id).to_owned(),
-                span: *span,
-            });
-        }
-    }
-
-    report
+    out
 }
 
-fn collect_referenced_cells<'a>(slice: &'a SliceDecl) -> std::collections::HashSet<&'a str> {
-    let mut out = std::collections::HashSet::new();
-
+fn collect_referenced_cells(slice: &SliceDecl) -> std::collections::HashSet<&str> {
     fn visit_value<'a>(value: &'a FieldValue, out: &mut std::collections::HashSet<&'a str>) {
         match value {
             FieldValue::Ident(i) => {
@@ -481,9 +515,13 @@ fn collect_referenced_cells<'a>(slice: &'a SliceDecl) -> std::collections::HashS
                 BlockItem::Block(b) => {
                     // Anonymous blocks like cells / cells_after carry cell-ids
                     // as their inner field keys.
-                    if matches!(b.kind.name.as_str(),
-                                "cells" | "cells_after"
-                                | "cells_after_pre_rollback" | "cells_after_rollback") {
+                    if matches!(
+                        b.kind.name.as_str(),
+                        "cells"
+                            | "cells_after"
+                            | "cells_after_pre_rollback"
+                            | "cells_after_rollback"
+                    ) {
                         for inner in &b.items {
                             if let BlockItem::Field(f) = inner {
                                 out.insert(f.key.name.as_str());
@@ -495,6 +533,8 @@ fn collect_referenced_cells<'a>(slice: &'a SliceDecl) -> std::collections::HashS
             }
         }
     }
+
+    let mut out = std::collections::HashSet::new();
 
     for item in &slice.items {
         if let BlockItem::Block(b) = item {
@@ -523,7 +563,10 @@ fn field_ident<'a>(block: &'a BlockDecl, key: &str) -> Option<&'a Ident> {
 }
 
 fn field_is_true(block: &BlockDecl, key: &str) -> bool {
-    matches!(field_value(block, key), Some(FieldValue::Bool { value: true, .. }))
+    matches!(
+        field_value(block, key),
+        Some(FieldValue::Bool { value: true, .. })
+    )
 }
 
 #[cfg(test)]
@@ -550,7 +593,11 @@ mod tests {
         assert_eq!(r.kill_tests.len(), 1);
         assert_eq!(r.walks, vec![1]);
         // Steps for the promote event.
-        let promote = r.events.iter().find(|e| e.id == "promote").expect("promote present");
+        let promote = r
+            .events
+            .iter()
+            .find(|e| e.id == "promote")
+            .expect("promote present");
         assert_eq!(promote.steps, vec!["s1_update", "s2_changelog"]);
     }
 
@@ -589,7 +636,11 @@ mod tests {
             r.references
         );
         // Check a representative path
-        assert!(r.references.iter().any(|s| s.from.starts_with("event/promote") && s.field == "mutates"));
+        assert!(
+            r.references
+                .iter()
+                .any(|s| s.from.starts_with("event/promote") && s.field == "mutates")
+        );
     }
 
     #[test]
@@ -603,7 +654,10 @@ mod tests {
         // but kill_test status is not executed_passing → unkilled.
         assert_eq!(g.unkilled_forbidden_states.len(), 1);
         // Symmetric-failure rows are complete (we added pf_deprecate_changelog_fail).
-        assert!(g.missing_post_failure.is_empty(), "expected no missing post_failure rows");
+        assert!(
+            g.missing_post_failure.is_empty(),
+            "expected no missing post_failure rows"
+        );
         // No unused cells.
         assert!(g.unused_cells.is_empty(), "expected no unused cells");
     }

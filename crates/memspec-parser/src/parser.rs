@@ -45,7 +45,11 @@ struct Parser<'t> {
 
 impl<'t> Parser<'t> {
     fn new(tokens: &'t [Token]) -> Self {
-        Self { tokens, pos: 0, diagnostics: Vec::new() }
+        Self {
+            tokens,
+            pos: 0,
+            diagnostics: Vec::new(),
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -109,7 +113,10 @@ impl<'t> Parser<'t> {
     fn expect_ident(&mut self) -> Option<Ident> {
         let token = self.peek();
         if let TokenKind::Identifier(name) = &token.kind {
-            let id = Ident { span: token.span, name: name.clone() };
+            let id = Ident {
+                span: token.span,
+                name: name.clone(),
+            };
             self.bump();
             Some(id)
         } else {
@@ -156,7 +163,10 @@ impl<'t> Parser<'t> {
                 Span::new(start, start),
                 "empty file: expected a top-level `slice` declaration",
             ));
-            return File { span: Span::new(start, start), slice: None };
+            return File {
+                span: Span::new(start, start),
+                slice: None,
+            };
         }
 
         let slice = self.parse_slice();
@@ -179,7 +189,10 @@ impl<'t> Parser<'t> {
         }
 
         let end = self.peek().span.start;
-        File { span: Span::new(start, end), slice }
+        File {
+            span: Span::new(start, end),
+            slice,
+        }
     }
 
     fn parse_slice(&mut self) -> Option<SliceDecl> {
@@ -198,7 +211,7 @@ impl<'t> Parser<'t> {
                 Diagnostic::error(
                     codes::E_PARSE_EXPECTED_SLICE,
                     kw.span,
-                    format!("expected top-level `slice` declaration, found `{}`", kw_name),
+                    format!("expected top-level `slice` declaration, found `{kw_name}`"),
                 )
                 .with_hint("a .memspec file must begin with `slice IDENT { ... }`"),
             );
@@ -227,7 +240,9 @@ impl<'t> Parser<'t> {
         let mut imports: Vec<Import> = Vec::new();
         loop {
             let head = self.peek();
-            let TokenKind::Identifier(name) = &head.kind else { break };
+            let TokenKind::Identifier(name) = &head.kind else {
+                break;
+            };
             if name != "use" {
                 break;
             }
@@ -236,14 +251,13 @@ impl<'t> Parser<'t> {
 
             // Path string literal
             let path_token = self.peek();
-            let (path_value, path_span) = match &path_token.kind {
-                TokenKind::StringLit { value, .. } => {
+            let (path_value, path_span) =
+                if let TokenKind::StringLit { value, .. } = &path_token.kind {
                     let span = path_token.span;
                     let v = value.clone();
                     self.bump();
                     (v, span)
-                }
-                _ => {
+                } else {
                     self.diagnostics.push(Diagnostic::error(
                         codes::E_PARSE_EXPECTED_TOKEN,
                         path_token.span,
@@ -255,8 +269,7 @@ impl<'t> Parser<'t> {
                     // Try to recover: skip one token so we don't infinite-loop.
                     self.bump();
                     continue;
-                }
-            };
+                };
 
             // `as` keyword
             let as_token = self.peek();
@@ -264,7 +277,10 @@ impl<'t> Parser<'t> {
                 self.diagnostics.push(Diagnostic::error(
                     codes::E_PARSE_EXPECTED_AS,
                     as_token.span,
-                    format!("expected `as` after import path, found {}", as_token.kind.label()),
+                    format!(
+                        "expected `as` after import path, found {}",
+                        as_token.kind.label()
+                    ),
                 ));
                 continue;
             };
@@ -292,7 +308,9 @@ impl<'t> Parser<'t> {
                         alias.span,
                         format!("duplicate import alias `{}`", alias.name),
                     )
-                    .with_hint("each `use` declaration must have a distinct alias within the slice"),
+                    .with_hint(
+                        "each `use` declaration must have a distinct alias within the slice",
+                    ),
                 );
             }
 
@@ -341,7 +359,10 @@ impl<'t> Parser<'t> {
             self.diagnostics.push(Diagnostic::error(
                 codes::E_PARSE_UNEXPECTED_TOKEN,
                 head.span,
-                format!("expected identifier (field name or block keyword), found {}", head.kind.label()),
+                format!(
+                    "expected identifier (field name or block keyword), found {}",
+                    head.kind.label()
+                ),
             ));
             return None;
         };
@@ -375,9 +396,9 @@ impl<'t> Parser<'t> {
         let next = &self.peek_at(1).kind;
         match next {
             TokenKind::Colon => self.parse_field().map(BlockItem::Field),
-            TokenKind::LBrace
-            | TokenKind::Identifier(_)
-            | TokenKind::IntLit(_) => self.parse_block_decl().map(BlockItem::Block),
+            TokenKind::LBrace | TokenKind::Identifier(_) | TokenKind::IntLit(_) => {
+                self.parse_block_decl().map(BlockItem::Block)
+            }
             other => {
                 // Couldn't disambiguate. Emit diagnostic against the second
                 // token and consume the head to avoid an infinite loop.
@@ -423,7 +444,10 @@ impl<'t> Parser<'t> {
                 self.diagnostics.push(Diagnostic::error(
                     codes::E_PARSE_UNEXPECTED_TOKEN,
                     span,
-                    format!("expected block name (identifier or integer) or `{{`, found {}", other.label()),
+                    format!(
+                        "expected block name (identifier or integer) or `{{`, found {}",
+                        other.label()
+                    ),
                 ));
                 return None;
             }
@@ -464,7 +488,11 @@ impl<'t> Parser<'t> {
                 let v = value.clone();
                 let triple = *is_triple;
                 self.bump();
-                Some(FieldValue::String { span, value: v, is_triple: triple })
+                Some(FieldValue::String {
+                    span,
+                    value: v,
+                    is_triple: triple,
+                })
             }
             TokenKind::IntLit(n) => {
                 let span = token.span;
@@ -473,7 +501,10 @@ impl<'t> Parser<'t> {
                 Some(FieldValue::Int { span, value: v })
             }
             TokenKind::Identifier(name) => {
-                let head = Ident { span: token.span, name: name.clone() };
+                let head = Ident {
+                    span: token.span,
+                    name: name.clone(),
+                };
                 self.bump();
                 // Disambiguate by lookahead.
                 match self.peek_kind() {
@@ -521,7 +552,10 @@ impl<'t> Parser<'t> {
             }
         }
         let close_span = self.expect(&TokenKind::RBracket);
-        FieldValue::List { span: open_span.join(close_span), items }
+        FieldValue::List {
+            span: open_span.join(close_span),
+            items,
+        }
     }
 
     fn parse_map(&mut self) -> FieldValue {
@@ -535,9 +569,8 @@ impl<'t> Parser<'t> {
                 continue;
             };
             self.expect(&TokenKind::Colon);
-            let value = match self.parse_field_value() {
-                Some(v) => v,
-                None => continue,
+            let Some(value) = self.parse_field_value() else {
+                continue;
             };
             let span = key.span.join(value.span());
             entries.push(MapEntry { span, key, value });
@@ -546,7 +579,10 @@ impl<'t> Parser<'t> {
             }
         }
         let close_span = self.expect(&TokenKind::RBrace);
-        FieldValue::Map { span: open_span.join(close_span), entries }
+        FieldValue::Map {
+            span: open_span.join(close_span),
+            entries,
+        }
     }
 
     /// `IDENT < param (sep param)* >` — separator is `|` (alternation) or
@@ -631,8 +667,14 @@ impl<'t> Parser<'t> {
 /// Ident value (everything else; semantic checks happen later).
 fn ident_to_value(id: Ident) -> FieldValue {
     match id.name.as_str() {
-        "true" => FieldValue::Bool { span: id.span, value: true },
-        "false" => FieldValue::Bool { span: id.span, value: false },
+        "true" => FieldValue::Bool {
+            span: id.span,
+            value: true,
+        },
+        "false" => FieldValue::Bool {
+            span: id.span,
+            value: false,
+        },
         _ => FieldValue::Ident(id),
     }
 }
@@ -669,12 +711,21 @@ mod tests {
         assert_no_diagnostics(&r);
         let slice = r.file.slice.unwrap();
         assert_eq!(slice.items.len(), 1);
-        let BlockItem::Block(meta) = &slice.items[0] else { panic!("expected block") };
+        let BlockItem::Block(meta) = &slice.items[0] else {
+            panic!("expected block")
+        };
         assert_eq!(meta.kind.name, "meta");
         assert!(meta.name.is_none());
-        let BlockItem::Field(f) = &meta.items[0] else { panic!("expected field") };
+        let BlockItem::Field(f) = &meta.items[0] else {
+            panic!("expected field")
+        };
         assert_eq!(f.key.name, "title");
-        let FieldValue::String { value, is_triple, .. } = &f.value else { panic!("string expected") };
+        let FieldValue::String {
+            value, is_triple, ..
+        } = &f.value
+        else {
+            panic!("string expected")
+        };
         assert_eq!(value, "hello");
         assert!(!is_triple);
     }
@@ -685,10 +736,12 @@ mod tests {
         assert_no_diagnostics(&r);
         let cell = match &r.file.slice.unwrap().items[0] {
             BlockItem::Block(b) => b.clone(),
-            _ => panic!(),
+            BlockItem::Field(_) => panic!(),
         };
         assert_eq!(cell.kind.name, "cell");
-        let BlockName::Ident(n) = cell.name.unwrap() else { panic!() };
+        let BlockName::Ident(n) = cell.name.unwrap() else {
+            panic!()
+        };
         assert_eq!(n.name, "foo");
     }
 
@@ -698,10 +751,12 @@ mod tests {
         assert_no_diagnostics(&r);
         let walk = match &r.file.slice.unwrap().items[0] {
             BlockItem::Block(b) => b.clone(),
-            _ => panic!(),
+            BlockItem::Field(_) => panic!(),
         };
         assert_eq!(walk.kind.name, "walk");
-        let BlockName::Int { value, .. } = walk.name.unwrap() else { panic!() };
+        let BlockName::Int { value, .. } = walk.name.unwrap() else {
+            panic!()
+        };
         assert_eq!(value, 1);
     }
 
@@ -710,7 +765,15 @@ mod tests {
         let r = parse_str("slice s { cell c { type: enum<draft | published | archived> } }");
         assert_no_diagnostics(&r);
         let f = first_field_named(&r, "type");
-        let FieldValue::TypeApp { head, params, alternation, .. } = f else { panic!() };
+        let FieldValue::TypeApp {
+            head,
+            params,
+            alternation,
+            ..
+        } = f
+        else {
+            panic!()
+        };
         assert_eq!(head.name, "enum");
         assert!(alternation);
         assert_eq!(params.len(), 3);
@@ -721,7 +784,14 @@ mod tests {
         let r = parse_str("slice s { cell c { type: map<draft, archived> } }");
         assert_no_diagnostics(&r);
         let f = first_field_named(&r, "type");
-        let FieldValue::TypeApp { alternation, params, .. } = f else { panic!() };
+        let FieldValue::TypeApp {
+            alternation,
+            params,
+            ..
+        } = f
+        else {
+            panic!()
+        };
         assert!(!alternation);
         assert_eq!(params.len(), 2);
     }
@@ -731,16 +801,21 @@ mod tests {
         let r = parse_str("slice s { event e { mutates: [a, b, c] } }");
         assert_no_diagnostics(&r);
         let f = first_field_named(&r, "mutates");
-        let FieldValue::List { items, .. } = f else { panic!() };
+        let FieldValue::List { items, .. } = f else {
+            panic!()
+        };
         assert_eq!(items.len(), 3);
     }
 
     #[test]
     fn parses_map_value() {
-        let r = parse_str(r#"slice s { cell c { impl_hints: { rust: "Vec<u8>", ruby: "Array" } } }"#);
+        let r =
+            parse_str(r#"slice s { cell c { impl_hints: { rust: "Vec<u8>", ruby: "Array" } } }"#);
         assert_no_diagnostics(&r);
         let f = first_field_named(&r, "impl_hints");
-        let FieldValue::Map { entries, .. } = f else { panic!() };
+        let FieldValue::Map { entries, .. } = f else {
+            panic!()
+        };
         assert_eq!(entries.len(), 2);
     }
 
@@ -751,7 +826,10 @@ mod tests {
         let mutable = first_field_named(&r, "mutable");
         assert!(matches!(mutable, FieldValue::Bool { value: true, .. }));
         let default_active = first_field_named(&r, "default_active");
-        assert!(matches!(default_active, FieldValue::Bool { value: false, .. }));
+        assert!(matches!(
+            default_active,
+            FieldValue::Bool { value: false, .. }
+        ));
     }
 
     #[test]
@@ -759,7 +837,9 @@ mod tests {
         let r = parse_str("slice s { association a { enforced_by: event_handler(promote) } }");
         assert_no_diagnostics(&r);
         let f = first_field_named(&r, "enforced_by");
-        let FieldValue::Call { head, args, .. } = f else { panic!() };
+        let FieldValue::Call { head, args, .. } = f else {
+            panic!()
+        };
         assert_eq!(head.name, "event_handler");
         assert_eq!(args.len(), 1);
     }
@@ -767,23 +847,23 @@ mod tests {
     #[test]
     fn parses_anonymous_block() {
         let r = parse_str(
-            r#"slice s {
+            r"slice s {
                 post_failure pf {
                     cells_after_pre_rollback {
                         a: published
                         b: true
                     }
                 }
-            }"#,
+            }",
         );
         assert_no_diagnostics(&r);
         let pf = match &r.file.slice.unwrap().items[0] {
             BlockItem::Block(b) => b.clone(),
-            _ => panic!(),
+            BlockItem::Field(_) => panic!(),
         };
         let inner = match &pf.items[0] {
             BlockItem::Block(b) => b.clone(),
-            _ => panic!(),
+            BlockItem::Field(_) => panic!(),
         };
         assert_eq!(inner.kind.name, "cells_after_pre_rollback");
         assert!(inner.name.is_none());
@@ -793,19 +873,31 @@ mod tests {
     #[test]
     fn empty_file_emits_diagnostic() {
         let r = parse_str("");
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_EMPTY_FILE));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_EMPTY_FILE)
+        );
     }
 
     #[test]
     fn missing_top_level_slice_emits_diagnostic() {
         let r = parse_str("cell foo { }");
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_EXPECTED_SLICE));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_EXPECTED_SLICE)
+        );
     }
 
     #[test]
     fn extra_top_level_decl_emits_diagnostic() {
         let r = parse_str("slice a { } slice b { }");
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_MULTIPLE_SLICES));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_MULTIPLE_SLICES)
+        );
     }
 
     #[test]
@@ -850,13 +942,19 @@ mod tests {
         let slice = r.file.slice.unwrap();
         let derived = match &slice.items[0] {
             BlockItem::Block(b) => b.clone(),
-            _ => panic!(),
+            BlockItem::Field(_) => panic!(),
         };
-        let FieldValue::List { items, .. } = field_of(&derived, "derives_from") else { panic!() };
-        let FieldValue::QualifiedIdent { alias, name, .. } = &items[0] else { panic!() };
+        let FieldValue::List { items, .. } = field_of(&derived, "derives_from") else {
+            panic!()
+        };
+        let FieldValue::QualifiedIdent { alias, name, .. } = &items[0] else {
+            panic!()
+        };
         assert_eq!(alias.name, "o");
         assert_eq!(name.name, "cell_a");
-        let FieldValue::Ident(i) = &items[1] else { panic!() };
+        let FieldValue::Ident(i) = &items[1] else {
+            panic!()
+        };
         assert_eq!(i.name, "local_b");
     }
 
@@ -868,7 +966,11 @@ mod tests {
                 use "./b.memspec" as x
             }"#,
         );
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_DUPLICATE_IMPORT_ALIAS));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_DUPLICATE_IMPORT_ALIAS)
+        );
     }
 
     #[test]
@@ -879,13 +981,21 @@ mod tests {
                 use "./other.memspec" as o
             }"#,
         );
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_USE_AFTER_DECL));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_USE_AFTER_DECL)
+        );
     }
 
     #[test]
     fn use_without_as_emits_diagnostic() {
         let r = parse_str(r#"slice s { use "./a.memspec" foo }"#);
-        assert!(r.diagnostics.iter().any(|d| d.code == codes::E_PARSE_EXPECTED_AS));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == codes::E_PARSE_EXPECTED_AS)
+        );
     }
 
     fn field_of(block: &BlockDecl, key: &str) -> FieldValue {
@@ -912,7 +1022,11 @@ mod tests {
         assert_eq!(slice.name.name, "rule_lifecycle_minimal");
         // Spot-check: meta + walk + 3 cells + 1 derived + 1 association
         // + 2 events + 1 post_failure + 1 forbidden_state + 1 kill_test
-        assert!(slice.items.len() >= 11, "expected ≥11 top-level items, got {}", slice.items.len());
+        assert!(
+            slice.items.len() >= 11,
+            "expected ≥11 top-level items, got {}",
+            slice.items.len()
+        );
     }
 
     // ----- helpers -----
@@ -927,12 +1041,12 @@ mod tests {
                             return Some(v);
                         }
                     }
-                    _ => {}
+                    BlockItem::Field(_) => {}
                 }
             }
             None
         }
         find(&r.file.slice.as_ref().unwrap().items, key)
-            .unwrap_or_else(|| panic!("field `{}` not found", key))
+            .unwrap_or_else(|| panic!("field `{key}` not found"))
     }
 }

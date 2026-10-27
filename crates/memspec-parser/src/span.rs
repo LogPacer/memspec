@@ -39,7 +39,7 @@ impl Span {
 
     /// Slice the source string this span points into.
     #[must_use]
-    pub fn slice<'s>(self, source: &'s str) -> &'s str {
+    pub fn slice(self, source: &str) -> &str {
         &source[self.start..self.end]
     }
 }
@@ -67,7 +67,10 @@ impl<'s> SourceMap<'s> {
                 line_starts.push(i + 1);
             }
         }
-        Self { source, line_starts }
+        Self {
+            source,
+            line_starts,
+        }
     }
 
     pub fn source(&self) -> &'s str {

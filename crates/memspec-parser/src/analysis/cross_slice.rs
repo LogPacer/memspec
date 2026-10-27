@@ -44,7 +44,9 @@ fn build_per_file_ids(file: &File) -> PerFileIds {
     let Some(slice) = &file.slice else { return ids };
     for item in &slice.items {
         let BlockItem::Block(b) = item else { continue };
-        let Some(BlockName::Ident(name)) = &b.name else { continue };
+        let Some(BlockName::Ident(name)) = &b.name else {
+            continue;
+        };
         let id = name.name.clone();
         match b.kind.name.as_str() {
             "cell" => {
@@ -111,7 +113,7 @@ pub fn resolve(working_set: &WorkingSet) -> BTreeMap<PathBuf, Vec<Diagnostic>> {
 fn item_as_block(item: &BlockItem) -> Option<&BlockDecl> {
     match item {
         BlockItem::Block(b) => Some(b),
-        _ => None,
+        BlockItem::Field(_) => None,
     }
 }
 
@@ -119,10 +121,14 @@ fn item_as_block(item: &BlockItem) -> Option<&BlockDecl> {
 /// i.e., for each `alias.id` reference found, the canonical (path, id) the
 /// alias resolves to. Used by `analyze_working_set` to suppress
 /// false-positive "unused cell" warnings on cells consumed across slices.
-pub fn cross_referenced_ids(working_set: &WorkingSet) -> BTreeMap<PathBuf, std::collections::HashSet<String>> {
+pub fn cross_referenced_ids(
+    working_set: &WorkingSet,
+) -> BTreeMap<PathBuf, std::collections::HashSet<String>> {
     let mut out: BTreeMap<PathBuf, std::collections::HashSet<String>> = BTreeMap::new();
     for lf in &working_set.files {
-        let Some(slice) = &lf.file.slice else { continue };
+        let Some(slice) = &lf.file.slice else {
+            continue;
+        };
         for item in &slice.items {
             collect_qualified(item_as_block(item), &lf.imports_resolved, &mut out);
         }
@@ -152,7 +158,9 @@ fn collect_qualified_value(
     match value {
         FieldValue::QualifiedIdent { alias, name, .. } => {
             if let Some(target) = alias_map.get(alias.name.as_str()) {
-                out.entry(target.clone()).or_default().insert(name.name.clone());
+                out.entry(target.clone())
+                    .or_default()
+                    .insert(name.name.clone());
             }
         }
         FieldValue::List { items, .. } => {
@@ -179,7 +187,7 @@ fn collect_qualified_value(
     }
 }
 
-/// Walk a block (and its inner blocks) looking for QualifiedIdent values
+/// Walk a block (and its inner blocks) looking for `QualifiedIdent` values
 /// in any field; resolve each against the alias map + per-file ids.
 fn walk_block_for_qualified_refs(
     block: Option<&BlockDecl>,
@@ -224,7 +232,9 @@ fn walk_value(
                     );
                 }
                 Some(target_path) => {
-                    let Some(ids) = per_file.get(target_path) else { return };
+                    let Some(ids) = per_file.get(target_path) else {
+                        return;
+                    };
                     if !ids.contains(&name.name) {
                         out.push(
                             Diagnostic::error(
@@ -296,7 +306,10 @@ mod tests {
                 "slice other { cell cell_a { type: boolean mutable: true } }",
             );
         let diags = run_resolve(&loader, "/root/main.memspec");
-        assert!(diags.is_empty(), "expected clean resolution, got: {diags:#?}");
+        assert!(
+            diags.is_empty(),
+            "expected clean resolution, got: {diags:#?}"
+        );
     }
 
     #[test]
@@ -311,8 +324,14 @@ mod tests {
             }"#,
         );
         let diags = run_resolve(&loader, "/root/main.memspec");
-        let main_diags = diags.get(Path::new("/root/main.memspec")).expect("main diags");
-        assert!(main_diags.iter().any(|d| d.code == codes::E_LOADER_UNRESOLVED_ALIAS));
+        let main_diags = diags
+            .get(Path::new("/root/main.memspec"))
+            .expect("main diags");
+        assert!(
+            main_diags
+                .iter()
+                .any(|d| d.code == codes::E_LOADER_UNRESOLVED_ALIAS)
+        );
     }
 
     #[test]
@@ -333,8 +352,14 @@ mod tests {
                 "slice other { cell cell_a { type: boolean mutable: true } }",
             );
         let diags = run_resolve(&loader, "/root/main.memspec");
-        let main_diags = diags.get(Path::new("/root/main.memspec")).expect("main diags");
-        assert!(main_diags.iter().any(|d| d.code == codes::E_LOADER_QUALIFIED_REF_UNRESOLVED));
+        let main_diags = diags
+            .get(Path::new("/root/main.memspec"))
+            .expect("main diags");
+        assert!(
+            main_diags
+                .iter()
+                .any(|d| d.code == codes::E_LOADER_QUALIFIED_REF_UNRESOLVED)
+        );
     }
 
     #[test]
@@ -353,8 +378,14 @@ mod tests {
                     cell local_c { type: boolean mutable: true }
                 }"#,
             )
-            .with_file("/root/other.memspec", "slice other { cell cell_a { type: boolean mutable: true } }");
+            .with_file(
+                "/root/other.memspec",
+                "slice other { cell cell_a { type: boolean mutable: true } }",
+            );
         let diags = run_resolve(&loader, "/root/main.memspec");
-        assert!(diags.is_empty(), "no qualified refs to resolve here, got: {diags:#?}");
+        assert!(
+            diags.is_empty(),
+            "no qualified refs to resolve here, got: {diags:#?}"
+        );
     }
 }

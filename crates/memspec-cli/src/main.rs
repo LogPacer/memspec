@@ -15,9 +15,7 @@
 
 #[cfg(feature = "experimental-revisions")]
 use std::io::Write;
-#[cfg(feature = "experimental-revisions")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -123,7 +121,7 @@ enum Command {
         /// Show every site that references the given ID.
         #[arg(long, conflicts_with_all = ["list_ids", "by_id", "gaps"])]
         refs_to: Option<String>,
-        /// Show structured gap analysis (unkilled forbidden states, missing post_failure, unused cells).
+        /// Show structured gap analysis (unkilled forbidden states, missing `post_failure`, unused cells).
         #[arg(long, conflicts_with_all = ["list_ids", "by_id", "refs_to"])]
         gaps: bool,
     },
@@ -197,13 +195,20 @@ fn main() -> ExitCode {
             by_id,
             refs_to,
             gaps,
-        } => query(&file, list_ids, by_id, refs_to, gaps),
+        } => query(&file, list_ids, by_id.as_deref(), refs_to.as_deref(), gaps),
         #[cfg(feature = "experimental-revisions")]
         Command::Experimental { command } => experimental(command),
     }
 }
 
 fn schema_cmd() -> ExitCode {
+    fn add<T: JsonSchema>(name: &str, defs: &mut serde_json::Map<String, serde_json::Value>) {
+        let s = schema_for!(T);
+        if let Ok(v) = serde_json::to_value(&s) {
+            defs.insert(name.to_owned(), v);
+        }
+    }
+
     // Compose one document with `$defs` for every report type the CLI emits.
     // Agents can `--json` against any of these and version against the schema.
     let mut combined = serde_json::json!({
@@ -217,13 +222,6 @@ fn schema_cmd() -> ExitCode {
         .get_mut("$defs")
         .and_then(|v| v.as_object_mut())
         .expect("defs object");
-
-    fn add<T: JsonSchema>(name: &str, defs: &mut serde_json::Map<String, serde_json::Value>) {
-        let s = schema_for!(T);
-        if let Ok(v) = serde_json::to_value(&s) {
-            defs.insert(name.to_owned(), v);
-        }
-    }
 
     // Walk reports
     add::<JsonReport>("walk_single", defs);
@@ -435,8 +433,7 @@ fn synthesize_revision_cmd(
             .report
             .revisions
             .last()
-            .map(|revision| revision.revision_number)
-            .unwrap_or(0);
+            .map_or(0, |revision| revision.revision_number);
         println!("appended revision {revision_number} to {}", path.display());
     }
 
@@ -489,7 +486,7 @@ fn corrupt_last_result_hash_for_test(source: &mut String) {
     } else {
         "0"
     };
-    source.replace_range(pos..pos + 1, replacement);
+    source.replace_range(pos..=pos, replacement);
 }
 
 fn suggest_cmd(path: &PathBuf) -> ExitCode {
@@ -575,7 +572,7 @@ fn render_cmd(path: &PathBuf, format: RenderFormat, aggregate: bool) -> ExitCode
     ExitCode::from(0)
 }
 
-fn render_aggregate(path: &PathBuf, format: RenderFormat) -> ExitCode {
+fn render_aggregate(path: &Path, format: RenderFormat) -> ExitCode {
     let loader = FsLoader;
     let ws = load_with_imports(&loader, path);
 
@@ -603,8 +600,8 @@ fn render_aggregate(path: &PathBuf, format: RenderFormat) -> ExitCode {
 fn query(
     path: &PathBuf,
     list_ids: bool,
-    by_id: Option<String>,
-    refs_to: Option<String>,
+    by_id: Option<&str>,
+    refs_to: Option<&str>,
     gaps: bool,
 ) -> ExitCode {
     let source = match std::fs::read_to_string(path) {
@@ -625,15 +622,14 @@ fn query(
 
     let json = if list_ids {
         serde_json::to_value(q::list_ids(&pr.file))
-    } else if let Some(id) = by_id.as_deref() {
-        match q::by_id(&pr.file, id) {
-            Some(report) => serde_json::to_value(report),
-            None => {
-                eprintln!("memspec: no declaration named `{id}` in {}", path.display());
-                return ExitCode::from(1);
-            }
+    } else if let Some(id) = by_id {
+        if let Some(report) = q::by_id(&pr.file, id) {
+            serde_json::to_value(report)
+        } else {
+            eprintln!("memspec: no declaration named `{id}` in {}", path.display());
+            return ExitCode::from(1);
         }
-    } else if let Some(id) = refs_to.as_deref() {
+    } else if let Some(id) = refs_to {
         serde_json::to_value(q::refs_to(&pr.file, id))
     } else if gaps {
         serde_json::to_value(q::gaps(&pr.file))
@@ -706,7 +702,7 @@ fn walk_single(path: &PathBuf, json: bool) -> ExitCode {
     exit_for_diagnostics(&diagnostics)
 }
 
-fn walk_multi(path: &PathBuf, json: bool) -> ExitCode {
+fn walk_multi(path: &Path, json: bool) -> ExitCode {
     let loader = FsLoader;
     let ws = load_with_imports(&loader, path);
     let mut analysis = analyze_working_set(&ws);
@@ -715,10 +711,10 @@ fn walk_multi(path: &PathBuf, json: bool) -> ExitCode {
     // is obviously not a .memspec (markdown, etc.). Keeps honest reporting
     // when the file IS a real .memspec with bad content somewhere.
     for lf in &ws.files {
-        if let Some(diags) = analysis.by_file.get_mut(&lf.path) {
-            if let Some(d) = maybe_wrong_file_type(diags, &lf.source, &lf.path) {
-                *diags = vec![d];
-            }
+        if let Some(diags) = analysis.by_file.get_mut(&lf.path)
+            && let Some(d) = maybe_wrong_file_type(diags, &lf.source, &lf.path)
+        {
+            *diags = vec![d];
         }
     }
 
@@ -754,7 +750,7 @@ fn walk_multi(path: &PathBuf, json: bool) -> ExitCode {
 fn maybe_wrong_file_type(
     diagnostics: &[Diagnostic],
     source: &str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Option<Diagnostic> {
     let lex_count = diagnostics
         .iter()
@@ -819,8 +815,7 @@ fn exit_for_diagnostics_refs(diagnostics: &[&Diagnostic]) -> ExitCode {
             .and_then(|s| s.parse::<u32>().ok());
         match n {
             Some(n) if n < 200 => has_parse_class = true,
-            Some(_) => has_semantic = true,
-            None => has_semantic = true, // unrecognised code → fail safely
+            _ => has_semantic = true, // unrecognised code → fail safely
         }
     }
     if has_parse_class {
@@ -846,8 +841,7 @@ fn print_multi_text_report(
         let diagnostics = analysis
             .by_file
             .get(&lf.path)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
+            .map_or(&[][..], Vec::as_slice);
         let counts = SliceCounts::from_file(&lf.file);
         let errors = diagnostics
             .iter()
@@ -910,7 +904,7 @@ fn print_multi_text_report(
     }
 }
 
-fn print_text_report(path: &PathBuf, file: &File, diagnostics: &[Diagnostic], map: &SourceMap<'_>) {
+fn print_text_report(path: &Path, file: &File, diagnostics: &[Diagnostic], map: &SourceMap<'_>) {
     let counts = SliceCounts::from_file(file);
     let errors = diagnostics
         .iter()
@@ -1078,8 +1072,7 @@ impl JsonMultiReport {
             let diagnostics = analysis
                 .by_file
                 .get(&lf.path)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
+                .map_or(&[][..], Vec::as_slice);
             let map = SourceMap::new(&lf.source);
             let json_diags: Vec<_> = diagnostics
                 .iter()
